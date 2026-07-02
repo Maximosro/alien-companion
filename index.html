@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ALIEN — Space Invaders</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100vw;height:100vh;height:100dvh;overflow:hidden;background:#000}
+  body{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-family:'Courier New',monospace;user-select:none;-webkit-user-select:none;
+  }
+  canvas{
+    display:block;position:fixed;top:0;left:0;
+    width:100vw;height:100vh;height:100dvh;
+    image-rendering:pixelated;
+  }
+  .ui-layer{
+    position:fixed;bottom:0;left:0;right:0;
+    display:flex;flex-direction:column;align-items:center;
+    padding-bottom:max(16px, env(safe-area-inset-bottom, 16px));
+    padding-left:16px;padding-right:16px;
+    z-index:10;pointer-events:none;
+  }
+  .ui-layer>*{pointer-events:auto}
+  .title{color:#0f0;font-size:clamp(28px,8vw,64px);font-weight:bold;letter-spacing:clamp(8px,2vw,20px);text-shadow:0 0 24px rgba(0,255,0,.6),0 0 60px rgba(0,255,0,.2)}
+  .status{color:rgba(0,255,0,.4);font-size:clamp(12px,2.5vw,18px);letter-spacing:clamp(4px,1vw,8px);margin:8px 0 12px}
+  .btns{display:flex;gap:clamp(6px,1.5vw,14px);flex-wrap:wrap;justify-content:center}
+  button{
+    padding:clamp(12px,2vh,18px) clamp(18px,4vw,32px);
+    border:2px solid #080;cursor:pointer;
+    font-family:'Courier New',monospace;
+    font-size:clamp(14px,3vw,22px);font-weight:bold;
+    color:#080;background:#000;letter-spacing:2px;
+    text-transform:uppercase;
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  }
+  button.on{color:#0f0;border-color:#0f0;background:#010;box-shadow:0 0 20px rgba(0,255,0,.3),inset 0 0 10px rgba(0,255,0,.1)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="ui-layer">
+  <div class="title">ALIEN</div>
+  <div class="status" id="status">> IDLE</div>
+  <div class="btns">
+    <button class="on" data-s="idle">IDLE</button>
+    <button data-s="listening">LISTEN</button>
+    <button data-s="thinking">THINK</button>
+    <button data-s="speaking">SPEAK</button>
+  </div>
+</div>
+
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');
+
+// ── El canvas se redimensiona a la ventana ──
+function resize(){
+  C.width=window.innerWidth;
+  C.height=window.innerHeight;
+}
+window.addEventListener('resize',resize);
+resize();
+
+const COL={bg:'#000000',green:'#33ff33',dark:'#1a8c1a',light:'#66ff66',white:'#ffffff',red:'#ff3333',yellow:'#ffff00'};
+
+// ═══════════════ AUDIO — Sintetizador Chiptune ═══════════════
+let audioCtx=null;
+let thinkOsc=null,thinkGain=null,thinkTimer=null;
+let thinkNoteIdx=0;
+// Notas del patrón "pensando" (frecuencias en Hz) + silencios (0)
+const thinkNotes=[523,0,659,0,784,659,523,0,  // C5 E5 G5 E5 C5
+                   0,0,523,659,784,0,1047,0]; // C5 E5 G5 C6
+const thinkRhythm=[120,80,120,80,100,80,180,200,  // ms por nota
+                    60,60,100,100,80,60,200,400];
+
+function initAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+}
+
+function stopThinkSound(){
+  if(thinkTimer){clearTimeout(thinkTimer);thinkTimer=null}
+  if(thinkOsc){try{thinkOsc.stop()}catch(e){};thinkOsc.disconnect();thinkOsc=null}
+  if(thinkGain){thinkGain.disconnect();thinkGain=null}
+  thinkNoteIdx=0;
+}
+
+function playThinkNote(){
+  if(state!=='thinking'){stopThinkSound();return}
+  initAudio();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+
+  const freq=thinkNotes[thinkNoteIdx];
+  const dur=thinkRhythm[thinkNoteIdx]/1000;
+
+  if(freq>0){
+    // Crear nota chiptune (onda cuadrada + vibrato sutil)
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.type='square';
+    osc.frequency.value=freq;
+    // Vibrato sutil (modulación de frecuencia)
+    const vib=audioCtx.createOscillator();
+    vib.frequency.value=5;
+    const vibGain=audioCtx.createGain();
+    vibGain.gain.value=3;
+    vib.connect(vibGain);vibGain.connect(osc.frequency);
+    vib.start(audioCtx.currentTime);
+    vib.stop(audioCtx.currentTime+dur);
+    // Volumen con decay
+    gain.gain.setValueAtTime(.06,audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+dur*.8);
+    osc.connect(gain);gain.connect(audioCtx.destination);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime+dur+.01);
+  }
+
+  thinkNoteIdx=(thinkNoteIdx+1)%thinkNotes.length;
+  thinkTimer=setTimeout(playThinkNote,thinkRhythm[thinkNoteIdx]||100);
+}
+
+function startThinkSound(){
+  stopThinkSound();
+  thinkNoteIdx=0;
+  playThinkNote();
+}
+
+function stopAllSound(){
+  stopThinkSound();
+}
+
+let state='idle',tick=0,prevState='idle';
+document.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  prevState=state;
+  state=b.dataset.s;
+  document.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  // Audio: activar/desactivar según estado
+  if(state==='thinking'&&prevState!=='thinking')startThinkSound();
+  else if(state!=='thinking')stopAllSound();
+});
+const statusEl=document.getElementById('status');
+const statusText={idle:'> IDLE',listening:'> LISTENING',thinking:'> THINKING',speaking:'> SPEAKING'};
+
+const A0=['    ██    ██    ','   ████  ████   ','  ████████████  ','  ██ ██████ ██  ','  ████████████  ','    ████████    ','   ████  ████   ','  ██  ████  ██  '];
+const A1=['    ██    ██    ','   ████  ████   ','  ████████████  ','  ██ ██████ ██  ','  ████████████  ','    ████████    ','   ██ ████ ██   ','  ██    ██    ██'];
+
+const stars=[];for(let i=0;i<80;i++)stars.push({x:0,y:0,ph:Math.random()*Math.PI*2,sp:.2+Math.random()*1.5,rx:Math.random(),ry:Math.random()});
+
+function drawSprite(sprite,ox,oy,px,ovr){
+  for(let y=0;y<sprite.length;y++)for(let x=0;x<sprite[y].length;x++){
+    const ch=sprite[y][x];if(ch===' ')continue;
+    const k=`${x},${y}`;let c;
+    if(ovr&&ovr[k])c=ovr[k];
+    else if(y<=1)c=COL.light;
+    else if(y===3&&(x===2||x===13))c=COL.white;
+    else if(y>=6)c=COL.dark;
+    else c=COL.green;
+    X.fillStyle=c;X.fillRect(ox+x*px,oy+y*px,px,px);
+  }
+}
+
+function render(){
+  const W=C.width,H=C.height;
+  X.fillStyle=COL.bg;X.fillRect(0,0,W,H);
+
+  // ── PX dinámico: el alien ocupa ~50% del ancho de pantalla ──
+  const px=Math.max(4,Math.floor(W/24)); // 16cols*px <= ~66% W => px=W/24
+  const iW=16*px,iH=8*px;
+
+  // ── Centrado, con margen inferior para UI ──
+  const uiH=H*.16; // 16% para UI (solo botones, sin HUD)
+  const cx=W/2,cy=(H-uiH)/2;
+  let ox=cx-iW/2,oy=cy-iH/2,ex=0;
+
+  // ── Estrellas ──
+  for(const s of stars){
+    s.y-=s.sp;if(s.y<-5){s.y=H+5;s.rx=Math.random();s.ry=Math.random()}
+    const sx=s.rx*W,sy=s.y;
+    const a=.25+Math.sin(tick*.04+s.ph)*.25;
+    X.fillStyle=`rgba(0,255,51,${a})`;
+    const sr=Math.max(1,px/4);
+    X.fillRect(Math.round(sx),Math.round(sy),sr,sr);
+  }
+
+  const anim=Math.floor(tick*0.15)%2;
+  const sprite=anim===0?A0:A1;
+  let ovr={};
+
+  switch(state){
+    case'idle':
+      oy+=Math.sin(tick*.06)*px*.9;
+      break;
+    case'listening':
+      oy+=Math.sin(tick*.06)*px*.5+px*1.5;
+      if(Math.floor(tick*0.2)%2===0){ovr['4,0']='#fff';ovr['11,0']='#fff'}
+      ovr['2,3']='#fff';ovr['3,3']='#000';ovr['4,3']='#fff';
+      ovr['11,3']='#fff';ovr['12,3']='#000';ovr['13,3']='#fff';
+      break;
+    case'thinking':
+      oy+=Math.sin(tick*.04)*px*.3;
+      const lx=Math.sin(tick*.12)*3;
+      const el=2+Math.round(lx),er=13+Math.round(lx);
+      ovr['2,3']=' ';ovr['3,3']=' ';ovr['4,3']=' ';
+      ovr['11,3']=' ';ovr['12,3']=' ';ovr['13,3']=' ';
+      if(el>=1&&el<=14)ovr[`${el},3`]=COL.white;
+      if(el+1>=1&&el+1<=14)ovr[`${el+1},3`]=COL.dark;
+      if(er>=1&&er<=14)ovr[`${er},3`]=COL.white;
+      if(er-1>=1&&er-1<=14)ovr[`${er-1},3`]=COL.dark;
+      const qs=Math.max(16,px*3);
+      if(Math.floor(tick*0.15)%4<2){X.fillStyle=COL.yellow;X.font=`bold ${qs}px "Courier New"`;X.fillText('?',cx+Math.max(50,px*6)+Math.sin(tick*.2)*px,oy-qs*1.2)}
+      if(Math.floor(tick*0.15+2)%4<2){X.fillStyle=COL.yellow;X.font=`bold ${Math.max(12,qs*.85)}px "Courier New"`;X.fillText('?',cx-Math.max(55,px*7)+Math.cos(tick*.25)*px,oy-qs*1.5)}
+      break;
+    case'speaking':
+      oy+=Math.sin(tick*.3)*px*.35;
+      ex=(Math.random()-.5)*px*.5;
+      const sf=Math.floor(tick*0.3)%3;
+      X.fillStyle='rgba(0,255,51,.15)';X.filter=`blur(${px*2}px)`;
+      X.fillRect(ox-px*3,oy-px*3,iW+px*6,iH+px*6);X.filter='none';
+      if(sf===0)for(let rx=7;rx<=9;rx++){ovr[`${rx},5`]='#f33';ovr[`${rx},6`]='#f33'}
+      else if(sf===1)for(let rx=6;rx<=10;rx++){ovr[`${rx},5`]='#f33';ovr[`${rx},6`]=(rx>=7&&rx<=9)?'#000':'#f33'}
+      else for(let rx=5;rx<=11;rx++){ovr[`${rx},5`]=(rx>=7&&rx<=9)?'#f33':' ';ovr[`${rx},6`]=(rx>=7&&rx<=9)?'#000':(rx===5||rx===11)?'#fff':'#f33'}
+      ovr['2,3']='#fff';ovr['3,3']='#000';ovr['4,3']='#fff';
+      ovr['11,3']='#fff';ovr['12,3']='#000';ovr['13,3']='#fff';
+      break;
+  }
+
+  if(state!=='idle'){
+    X.fillStyle=`rgba(0,255,51,${state==='speaking'?.14:.06})`;
+    X.filter=`blur(${px*1.5}px)`;
+    X.fillRect(ox-px*2,oy-px*2,iW+px*4,iH+px*4);X.filter='none';
+  }
+
+  drawSprite(sprite,ox+ex,oy,px,ovr);
+
+  // Sin HUD — más espacio para el alien
+
+  tick++;
+  statusEl.textContent=statusText[state];
+}
+
+setInterval(render,1000/10);
+</script>
+</body>
+</html>

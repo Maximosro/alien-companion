@@ -523,9 +523,18 @@ Ahora recibes datos reales extraídos de la web humana. Tu única tarea es RESPO
 - Si los datos no bastan para responder con seguridad, dilo con sarcasmo. No inventes datos.`;
 }
 
-const BLOCKED_DOMAINS = [];
+// Cargar blacklist persistente (localStorage). Si no hay nada o falla, empezar vacío.
+let BLOCKED_DOMAINS;
+try {
+  const stored = localStorage.getItem('alien_blocked_domains');
+  const parsed = stored ? JSON.parse(stored) : [];
+  BLOCKED_DOMAINS = Array.isArray(parsed) ? parsed : [];
+} catch(e) {
+  BLOCKED_DOMAINS = [];
+}
+console.log('🚫 Blacklist cargada:', BLOCKED_DOMAINS.length, 'dominios');
 function blockedDomain(url){ try{ const h=new URL(url).hostname.replace('www.',''); return BLOCKED_DOMAINS.some(d=>h.endsWith(d)); }catch(e){return false;} }
-function addToBlacklist(url){ try{ const h=new URL(url).hostname.replace('www.',''); if(!BLOCKED_DOMAINS.some(d=>h.endsWith(d))){ BLOCKED_DOMAINS.push(h); console.log('🚫 Añadido a blacklist:',h); } }catch(e){} }
+function addToBlacklist(url){ try{ const h=new URL(url).hostname.replace('www.',''); if(!BLOCKED_DOMAINS.some(d=>h.endsWith(d))){ BLOCKED_DOMAINS.push(h); try{ localStorage.setItem('alien_blocked_domains',JSON.stringify(BLOCKED_DOMAINS)); }catch(lsError){ console.warn('⚠️ No se pudo guardar blacklist en localStorage:',lsError.message); } console.log('🚫 Añadido a blacklist:',h); } }catch(e){ console.warn('addToBlacklist error:', e.message); } }
 
 // ═══════════════════════════════════════════════════════════
 // MÓDULO 2 — fetchUrl vía CORS proxy

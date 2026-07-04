@@ -41,7 +41,7 @@ Siempre 3 batidas. Cada una pide URLs a DeepSeek con feedback de las URLs que fa
 
 ### Blacklist
 
-Lista negra de dominios que crece automáticamente. Arranca vacía. Cuando `fetchUrl` falla (0 caracteres, error de red, respuesta antibot), el dominio se añade automáticamente y nunca se vuelve a consultar. El código filtra las URLs antes de fetchear, sin que DeepSeek necesite saberlo.
+Lista negra de dominios que crece automáticamente. Se carga desde `localStorage` al iniciar (clave `alien_blocked_domains`) y persiste entre sesiones. Si no hay datos previos, arranca vacía. Cuando `fetchUrl` falla (0 caracteres, error de red, respuesta antibot), el dominio se añade automáticamente y nunca se vuelve a consultar. El código filtra las URLs antes de fetchear, sin que DeepSeek necesite saberlo.
 
 ### Filtro de actualidad
 

@@ -486,7 +486,12 @@ if(!DEEPSEEK_KEY){
   if(k){ localStorage.setItem('alien_ds_key', k.trim()); location.reload(); }
 }
 const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
-const CORS_PROXY  = 'https://proxy.srv1158554.hstgr.cloud/?url=';
+function resolveProxyUrl(){
+  try {
+    if(localStorage.getItem('alien_use_local_proxy') === 'false') return 'https://proxy.srv1158554.hstgr.cloud/?url=';
+  } catch(e) { /* localStorage bloqueado, usar local por defecto */ }
+  return 'http://localhost:3000/?url=';
+}
 // Identidad + fecha/hora compartidas por las dos fases (búsqueda y respuesta)
 function buildBasePrompt(){
   const hoy = new Date().toLocaleDateString('es-ES', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
@@ -545,7 +550,7 @@ async function fetchUrl(url){
   const start=performance.now();
   console.log('🌐 FETCH',url.slice(0,100));
   try{
-    const res=await fetch(CORS_PROXY+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)});
+    const res=await fetch(resolveProxyUrl()+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)});
     if(!res.ok){console.warn('🌐 FETCH ❌ HTTP',res.status,'—',url.slice(0,80));return 'ERROR_HTTP:'+res.status;}
     const text=await res.text();
     const len=text.length;

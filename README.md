@@ -101,15 +101,45 @@ Filtro de dominios bloqueados. `addToBlacklist` se dispara automáticamente cuan
 
 ## Desarrollo
 
-```bash
-# Servir frontend
-python -m http.server 8080
+### Levantar
 
-# Proxy local (alternativa al VPS)
+```bash
+# 1. Proxy CORS (puerto 3000) — en una terminal
 node proxy/server.js
+
+# 2. Servidor web (puerto 8080) — en otra terminal
+node serve.js
 ```
 
 Abrir `http://localhost:8080` en navegador. Tocar la pantalla para hablar.
+
+### Tirar
+
+```bash
+# Mata los procesos por puerto
+# Windows (cmd):
+netstat -ano | findstr ":3000 :8080" | findstr LISTENING
+taskkill /F /PID <PID>
+
+# Linux / macOS:
+lsof -ti:3000 -ti:8080 | xargs kill
+```
+
+### Sin proxy local
+
+Si no necesitás el proxy local (usás el desplegado en VPS):
+
+```bash
+node serve.js
+```
+
+Y en la consola del navegador:
+
+```js
+localStorage.setItem('alien_use_local_proxy', 'false')
+```
+
+Esto apunta al proxy de producción `https://proxy.srv1158554.hstgr.cloud/`.
 
 ## Proxy
 

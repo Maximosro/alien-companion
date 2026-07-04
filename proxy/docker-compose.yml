@@ -1,0 +1,9 @@
+services:
+  alien-proxy:
+    build: .
+    container_name: alien-proxy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.alien-proxy.rule=Host(`proxy.srv1158554.hstgr.cloud`)"
+      - "traefik.http.services.alien-proxy.loadbalancer.server.port=3000"

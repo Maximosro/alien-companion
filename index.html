@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ALIEN — Space Invaders</title>
+<title>ALIEN — 32×32</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100vw;height:100vh;height:100dvh;overflow:hidden;background:#000}
@@ -37,9 +38,15 @@
     -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   }
   button.on{color:#0f0;border-color:#0f0;background:#010;box-shadow:0 0 20px rgba(0,255,0,.3),inset 0 0 10px rgba(0,255,0,.1)}
+  .bubble{position:fixed;top:8%;left:50%;transform:translateX(-50%);max-width:82vw;padding:14px 20px;background:rgba(0,12,0,0.93);border:2px solid #0f0;color:#0f0;font-family:'Courier New',monospace;font-size:clamp(13px,2.2vw,18px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s;box-shadow:0 0 18px rgba(0,255,0,.25);border-radius:4px;line-height:1.45;pointer-events:none}
+  .bubble::after{content:'';position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-top:8px solid #0f0}
+  .bubble.on{opacity:1}
+  .bubble.error{border-color:#f44;color:#f66;box-shadow:0 0 18px rgba(255,68,68,.3)}
+  .bubble.error::after{border-top-color:#f44}
 </style>
 </head>
 <body>
+<div class="bubble" id="bubble"></div>
 <canvas id="c"></canvas>
 <div class="ui-layer">
   <div class="title">ALIEN</div>
@@ -63,17 +70,29 @@ function resize(){
 window.addEventListener('resize',resize);
 resize();
 
-const COL={bg:'#000000',green:'#33ff33',dark:'#1a8c1a',light:'#66ff66',white:'#ffffff',red:'#ff3333',yellow:'#ffff00'};
+// ═══════════════════ PALETA — Solo verdes ═══════════════════
+// Se eliminó rojo, rosa, amarillo y cyan. Todo el modelo usa verdes.
+const COL={
+  bg:'#000000',
+  green:'#33ff33',   // cuerpo (verde medio)
+  light:'#66ff66',   // cabeza / brazos (verde claro)
+  pale:'#ccffcc',    // ojos (verde muy pálido)
+  teeth:'#aaffaa',   // dientes / antenas (verde pálido)
+  dark:'#1a8c1a',    // cuerpo inferior (verde oscuro)
+  dark2:'#0f5c0f',   // piernas (verde muy oscuro)
+  black:'#031503'    // pupilas / interior de boca (verde-negro)
+};
 
-// ═══════════════ AUDIO — Sintetizador Chiptune ═══════════════
+// ═══════════════════ AUDIO — Sintetizador Chiptune ═══════════════════
 let audioCtx=null;
 let thinkOsc=null,thinkGain=null,thinkTimer=null;
 let thinkNoteIdx=0;
-// Notas del patrón "pensando" (frecuencias en Hz) + silencios (0)
-const thinkNotes=[523,0,659,0,784,659,523,0,  // C5 E5 G5 E5 C5
-                   0,0,523,659,784,0,1047,0]; // C5 E5 G5 C6
-const thinkRhythm=[120,80,120,80,100,80,180,200,  // ms por nota
-                    60,60,100,100,80,60,200,400];
+const thinkNotes=[523,0,659,0,784,659,523,0,
+                   0,0,523,659,784,0,1047,0,
+                   784,0,659,0,523,784,659,0];
+const thinkRhythm=[120,80,120,80,100,80,180,200,
+                    60,60,100,100,80,60,200,400,
+                    140,60,100,80,120,100,160,200];
 
 function initAudio(){
   if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
@@ -95,22 +114,23 @@ function playThinkNote(){
   const dur=thinkRhythm[thinkNoteIdx]/1000;
 
   if(freq>0){
-    // Crear nota chiptune (onda cuadrada + vibrato sutil)
     const osc=audioCtx.createOscillator();
     const gain=audioCtx.createGain();
     osc.type='square';
     osc.frequency.value=freq;
-    // Vibrato sutil (modulación de frecuencia)
+
     const vib=audioCtx.createOscillator();
-    vib.frequency.value=5;
+    vib.frequency.value=5 + Math.sin(tick * 0.1) * 2;
     const vibGain=audioCtx.createGain();
     vibGain.gain.value=3;
     vib.connect(vibGain);vibGain.connect(osc.frequency);
     vib.start(audioCtx.currentTime);
     vib.stop(audioCtx.currentTime+dur);
-    // Volumen con decay
-    gain.gain.setValueAtTime(.06,audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+dur*.8);
+
+    gain.gain.setValueAtTime(0,audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(.08,audioCtx.currentTime+.01);
+    gain.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+dur*.9);
+
     osc.connect(gain);gain.connect(audioCtx.destination);
     osc.start(audioCtx.currentTime);
     osc.stop(audioCtx.currentTime+dur+.01);
@@ -130,117 +150,727 @@ function stopAllSound(){
   stopThinkSound();
 }
 
+// ═══════════════════ ESTADOS ═══════════════════
 let state='idle',tick=0,prevState='idle';
-document.querySelectorAll('button').forEach(b=>b.onclick=()=>{
-  prevState=state;
-  state=b.dataset.s;
+
+function setAlienState(newState){
+  if(state===newState)return;
+  console.log('🔵 STATE',state,'→',newState);
+  prevState=state;state=newState;
   document.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on');
-  // Audio: activar/desactivar según estado
-  if(state==='thinking'&&prevState!=='thinking')startThinkSound();
-  else if(state!=='thinking')stopAllSound();
-});
+  const btn=document.querySelector(`button[data-s="${newState}"]`);
+  if(btn)btn.classList.add('on');
+  if(newState==='thinking'&&prevState!=='thinking')startThinkSound();
+  else if(newState!=='thinking')stopAllSound();
+  statusEl.textContent=statusText[newState];
+}
+
+document.querySelectorAll('button').forEach(b=>b.onclick=()=>setAlienState(b.dataset.s));
 const statusEl=document.getElementById('status');
 const statusText={idle:'> IDLE',listening:'> LISTENING',thinking:'> THINKING',speaking:'> SPEAKING'};
 
-const A0=['    ██    ██    ','   ████  ████   ','  ████████████  ','  ██ ██████ ██  ','  ████████████  ','    ████████    ','   ████  ████   ','  ██  ████  ██  '];
-const A1=['    ██    ██    ','   ████  ████   ','  ████████████  ','  ██ ██████ ██  ','  ████████████  ','    ████████    ','   ██ ████ ██   ','  ██    ██    ██'];
+// ═══════════════════ SPRITES 32×32 — Alien Space Invaders ═══════════════════
+// Constructor de filas: recibe rangos [inicio,fin] de columnas rellenas (0-31).
+// Garantiza exactamente 32 caracteres por fila.
+function R(){
+  const a=new Array(32).fill(' ');
+  for(let i=0;i<arguments.length;i++){
+    const s=arguments[i][0],e=arguments[i][1];
+    for(let x=s;x<=e;x++)a[x]='#';
+  }
+  return a.join('');
+}
 
-const stars=[];for(let i=0;i<80;i++)stars.push({x:0,y:0,ph:Math.random()*Math.PI*2,sp:.2+Math.random()*1.5,rx:Math.random(),ry:Math.random()});
+// Frame A — piernas abiertas (posicion de marcha 1)
+const A0=[
+  R([12,13],[18,19]),                       // 0  puntas de antenas
+  R([11,14],[17,20]),                       // 1  antenas
+  R([10,21]),                               // 2  cúpula
+  R([8,23]),                                // 3
+  R([7,24]),                                // 4
+  R([6,25]),                                // 5
+  R([5,26]),                                // 6
+  R([4,27]),                                // 7
+  R([3,28]),                                // 8  hombros
+  R([2,29]),                                // 9  brazos extendidos
+  R([4,27]),                                // 10 banda de ojos
+  R([4,27]),                                // 11
+  R([4,27]),                                // 12
+  R([5,26]),                                // 13 mejillas
+  R([5,26]),                                // 14 banda de boca
+  R([5,26]),                                // 15
+  R([6,25]),                                // 16
+  R([6,25]),                                // 17
+  R([6,25]),                                // 18
+  R([7,24]),                                // 19
+  R([7,24]),                                // 20
+  R([8,23]),                                // 21
+  R([8,23]),                                // 22
+  R([9,22]),                                // 23 base del cuerpo
+  R([9,22]),                                // 24
+  R([8,11],[14,17],[20,23]),                // 25 piernas (abiertas)
+  R([8,11],[14,17],[20,23]),                // 26
+  R([6,11],[14,17],[20,25]),                // 27 pies hacia fuera
+  R([6,11],[14,17],[20,25]),                // 28
+  R([5,11],[14,17],[20,26]),                // 29
+  R([5,11],[14,17],[20,26]),                // 30
+  R([4,11],[14,17],[20,27])                 // 31
+];
+
+// Frame B — piernas juntas (posicion de marcha 2)
+const A1=[
+  R([12,13],[18,19]),
+  R([11,14],[17,20]),
+  R([10,21]),
+  R([8,23]),
+  R([7,24]),
+  R([6,25]),
+  R([5,26]),
+  R([4,27]),
+  R([3,28]),
+  R([2,29]),
+  R([4,27]),
+  R([4,27]),
+  R([4,27]),
+  R([5,26]),
+  R([5,26]),
+  R([5,26]),
+  R([6,25]),
+  R([6,25]),
+  R([6,25]),
+  R([7,24]),
+  R([7,24]),
+  R([8,23]),
+  R([8,23]),
+  R([9,22]),
+  R([9,22]),
+  R([10,13],[14,17],[18,21]),               // piernas (juntas)
+  R([10,13],[14,17],[18,21]),
+  R([10,13],[14,17],[18,21]),
+  R([10,13],[14,17],[18,21]),
+  R([10,13],[14,17],[18,21]),
+  R([10,13],[14,17],[18,21]),
+  R([10,13],[14,17],[18,21])
+];
+
+// ── Estrellas de fondo ──
+const stars=[];for(let i=0;i<90;i++)stars.push({x:0,y:0,ph:Math.random()*Math.PI*2,sp:.2+Math.random()*1.5,rx:Math.random(),ry:Math.random()});
+
+// ── Partículas de pensamiento ──
+const particles=[];
+function createParticle(x,y){
+  particles.push({
+    x:x,y:y,vx:(Math.random()-.5)*1.2,vy:-Math.random()*1.2-.6,
+    life:1,lifeDecay:0.018+Math.random()*0.018,
+    size:Math.max(2,Math.round(2+Math.random()*2))
+  });
+}
+function updateParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx;p.y+=p.vy;p.life-=p.lifeDecay;
+    if(p.life<=0)particles.splice(i,1);
+  }
+}
+function drawParticles(px,ox,oy){
+  particles.forEach(p=>{
+    X.fillStyle=`rgba(170,255,170,${p.life*0.7})`;
+    X.fillRect(ox+p.x*px,oy+p.y*px,p.size*px*0.4,p.size*px*0.4);
+  });
+}
+
+// ═══════════════════ RENDER DEL SPRITE ═══════════════════
+// Sombreado vertical del cuerpo: de claro (arriba) a oscuro (piernas).
+function bodyColor(y){
+  if(y<=1)return COL.teeth;   // antenas
+  if(y<=9)return COL.light;   // cabeza
+  if(y<=18)return COL.green;  // cuerpo
+  if(y<=24)return COL.dark;   // cuerpo inferior
+  return COL.dark2;           // piernas
+}
 
 function drawSprite(sprite,ox,oy,px,ovr){
-  for(let y=0;y<sprite.length;y++)for(let x=0;x<sprite[y].length;x++){
-    const ch=sprite[y][x];if(ch===' ')continue;
-    const k=`${x},${y}`;let c;
-    if(ovr&&ovr[k])c=ovr[k];
-    else if(y<=1)c=COL.light;
-    else if(y===3&&(x===2||x===13))c=COL.white;
-    else if(y>=6)c=COL.dark;
-    else c=COL.green;
-    X.fillStyle=c;X.fillRect(ox+x*px,oy+y*px,px,px);
+  for(let y=0;y<sprite.length;y++){
+    const row=sprite[y];
+    for(let x=0;x<row.length;x++){
+      if(row[x]!=='#')continue;
+      const k=x+','+y;
+      const c=(ovr&&ovr[k])?ovr[k]:bodyColor(y);
+      X.fillStyle=c;
+      X.fillRect(ox+x*px,oy+y*px,px,px);
+    }
   }
 }
 
+// Ojos: dos bloques 3×3 verde pálido con pupila móvil de 1px
+function setEyes(ovr,opt){
+  opt=opt||{};
+  const col=opt.color||COL.pale;
+  const pup=opt.pupil||COL.black;
+  const dx=opt.dx||0, dy=opt.dy||0;
+  for(const cx of [9,22]){
+    if(opt.closed){
+      // parpadeo: rendija oscura
+      ovr[(cx-1)+',11']=COL.black;
+      ovr[cx+',11']=COL.black;
+      ovr[(cx+1)+',11']=COL.black;
+    }else{
+      for(let ex=cx-1;ex<=cx+1;ex++)
+        for(let ey=10;ey<=12;ey++)
+          ovr[ex+','+ey]=col;
+      ovr[(cx+dx)+','+(11+dy)]=pup;
+    }
+  }
+}
+
+// Boca: 5 frames en verde (interior verde-negro, dientes verde pálido, lengua verde)
+function applyMouth(ovr,idx){
+  const B=COL.black,T=COL.teeth,G=COL.green;
+  const rect=(x0,y0,x1,y1,c)=>{for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)ovr[x+','+y]=c;};
+  if(idx===0){                                       // cerrada
+    rect(14,16,17,16,B);
+  }else if(idx===1){                                 // semi-abierta
+    rect(12,15,19,15,T); rect(12,16,19,16,B); rect(13,17,18,17,G);
+  }else if(idx===2){                                 // abierta
+    rect(11,15,20,15,T); rect(11,16,20,17,B); rect(12,18,19,18,G);
+  }else if(idx===3){                                 // redondeada (O)
+    rect(13,15,18,15,B); rect(12,16,19,16,B); rect(13,17,18,17,B);
+  }else if(idx===4){                                 // sonrisa con dientes
+    rect(11,15,20,15,T); rect(11,16,20,16,B); rect(11,17,20,17,T);
+  }
+}
+
+// Patrones de habla — combinaciones naturales de los frames de boca
+const speechPatterns=[
+  [0,1,0,2,1,0,3,1,2,1,0,4,1,2,0],
+  [0,1,2,1,3,1,4,1,2,1,0,1,2],
+  [0,3,1,4,1,2,1,0,1,3,2,1,0]
+];
+let currentPattern=0,patternFrame=0;
+let mouthIdx=0,lastMouthTick=-99;
+
+function getNextMouthFrame(){
+  if(Math.random()<0.02)currentPattern=Math.floor(Math.random()*speechPatterns.length);
+  patternFrame=(patternFrame+1)%speechPatterns[currentPattern].length;
+  return speechPatterns[currentPattern][patternFrame];
+}
+
+// Parpadeo lento compartido (idle / speaking)
+function blinking(){
+  const c=tick%72;
+  return c<2;
+}
+
+// ═══════════════════ BUCLE DE RENDER ═══════════════════
 function render(){
   const W=C.width,H=C.height;
   X.fillStyle=COL.bg;X.fillRect(0,0,W,H);
 
-  // ── PX dinámico: el alien ocupa ~50% del ancho de pantalla ──
-  const px=Math.max(4,Math.floor(W/24)); // 16cols*px <= ~66% W => px=W/24
-  const iW=16*px,iH=8*px;
-
-  // ── Centrado, con margen inferior para UI ──
-  const uiH=H*.16; // 16% para UI (solo botones, sin HUD)
+  // ── PX dinámico: el alien (32×32) ocupa ~55-60% del ancho y cabe con la UI ──
+  const uiH=Math.max(H*0.16,140);
+  const px=Math.max(2,Math.floor(Math.min(W*0.6,(H-uiH)*0.92)/32));
+  const iW=32*px,iH=32*px;
   const cx=W/2,cy=(H-uiH)/2;
   let ox=cx-iW/2,oy=cy-iH/2,ex=0;
 
   // ── Estrellas ──
   for(const s of stars){
-    s.y-=s.sp;if(s.y<-5){s.y=H+5;s.rx=Math.random();s.ry=Math.random()}
-    const sx=s.rx*W,sy=s.y;
-    const a=.25+Math.sin(tick*.04+s.ph)*.25;
+    s.y-=s.sp;if(s.y<-5){s.y=H+5;s.rx=Math.random()}
+    const sx=s.rx*W,a=.3+Math.sin(tick*.04+s.ph)*.3;
     X.fillStyle=`rgba(0,255,51,${a})`;
-    const sr=Math.max(1,px/4);
-    X.fillRect(Math.round(sx),Math.round(sy),sr,sr);
+    const sr=Math.max(1,px/3);
+    X.fillRect(Math.round(sx),Math.round(s.y),sr,sr);
   }
 
-  const anim=Math.floor(tick*0.15)%2;
+  // ── Selección de frame (marcha) según estado ──
+  const marchSpeed=state==='speaking'?0.22:state==='listening'?0.18:0.08;
+  const anim=Math.floor(tick*marchSpeed)%2;
   const sprite=anim===0?A0:A1;
-  let ovr={};
+  const ovr={};
 
   switch(state){
-    case'idle':
-      oy+=Math.sin(tick*.06)*px*.9;
+    case'idle':{
+      // Respiración suave de dos frecuencias + micro balanceo
+      oy+=Math.sin(tick*.04)*px*1.5+Math.sin(tick*.07)*px*0.3;
+      ex+=Math.sin(tick*.08)*px*0.12;
+      setEyes(ovr,{closed:blinking()});
       break;
-    case'listening':
-      oy+=Math.sin(tick*.06)*px*.5+px*1.5;
-      if(Math.floor(tick*0.2)%2===0){ovr['4,0']='#fff';ovr['11,0']='#fff'}
-      ovr['2,3']='#fff';ovr['3,3']='#000';ovr['4,3']='#fff';
-      ovr['11,3']='#fff';ovr['12,3']='#000';ovr['13,3']='#fff';
+    }
+
+    case'listening':{
+      // Atención: flota más alto y balancea vivo
+      oy+=Math.sin(tick*.1)*px*1.0+px*1.5;
+      ex+=Math.cos(tick*.15)*px*0.4;
+      // Ojos mirando hacia arriba + parpadeo
+      setEyes(ovr,{dy:-1,dx:Math.round(Math.sin(tick*.2)),color:COL.pale,closed:blinking()});
+      // Sonar: anillos cuadrados verdes expandiéndose (efecto "escuchando")
+      for(let i=0;i<3;i++){
+        const t=((tick*0.6+i*14)%42)/42;
+        const r=t*Math.min(W,H)*0.38;
+        X.strokeStyle=`rgba(0,255,102,${(1-t)*0.45})`;
+        X.lineWidth=Math.max(1,Math.round(px*0.4));
+        X.strokeRect(cx-r,cy-r,r*2,r*2);
+      }
       break;
-    case'thinking':
-      oy+=Math.sin(tick*.04)*px*.3;
-      const lx=Math.sin(tick*.12)*3;
-      const el=2+Math.round(lx),er=13+Math.round(lx);
-      ovr['2,3']=' ';ovr['3,3']=' ';ovr['4,3']=' ';
-      ovr['11,3']=' ';ovr['12,3']=' ';ovr['13,3']=' ';
-      if(el>=1&&el<=14)ovr[`${el},3`]=COL.white;
-      if(el+1>=1&&el+1<=14)ovr[`${el+1},3`]=COL.dark;
-      if(er>=1&&er<=14)ovr[`${er},3`]=COL.white;
-      if(er-1>=1&&er-1<=14)ovr[`${er-1},3`]=COL.dark;
-      const qs=Math.max(16,px*3);
-      if(Math.floor(tick*0.15)%4<2){X.fillStyle=COL.yellow;X.font=`bold ${qs}px "Courier New"`;X.fillText('?',cx+Math.max(50,px*6)+Math.sin(tick*.2)*px,oy-qs*1.2)}
-      if(Math.floor(tick*0.15+2)%4<2){X.fillStyle=COL.yellow;X.font=`bold ${Math.max(12,qs*.85)}px "Courier New"`;X.fillText('?',cx-Math.max(55,px*7)+Math.cos(tick*.25)*px,oy-qs*1.5)}
+    }
+
+    case'thinking':{
+      // Concentración: movimiento lento
+      oy+=Math.sin(tick*.05)*px*0.6;
+      ex+=Math.sin(tick*.06)*px*0.2;
+      // Ojos que miran a los lados (buscando la idea)
+      const eyeDX=Math.round(Math.sin(tick*.12)*1.5);
+      setEyes(ovr,{dx:eyeDX});
+      // Signos de interrogación flotando (verde) a ambos lados de la cabeza
+      const qs=Math.max(20,px*2.5);
+      const headTop=oy-px;
+      if(Math.floor(tick*0.1)%4<2){
+        X.fillStyle=COL.light;X.font=`bold ${qs}px "Courier New"`;
+        X.fillText('?',ox+iW+px,headTop+qs+Math.sin(tick*.15)*px);
+      }
+      if(Math.floor(tick*0.1+2)%4<2){
+        X.fillStyle=COL.teeth;X.font=`bold ${Math.max(16,qs*0.8)}px "Courier New"`;
+        X.fillText('?',ox-px*3,headTop+qs*1.3+Math.cos(tick*.2)*px);
+      }
+      // Partículas de pensamiento que suben desde la cabeza
+      if(Math.random()<0.12)createParticle(13+Math.random()*6,1);
       break;
-    case'speaking':
-      oy+=Math.sin(tick*.3)*px*.35;
-      ex=(Math.random()-.5)*px*.5;
-      const sf=Math.floor(tick*0.3)%3;
-      X.fillStyle='rgba(0,255,51,.15)';X.filter=`blur(${px*2}px)`;
-      X.fillRect(ox-px*3,oy-px*3,iW+px*6,iH+px*6);X.filter='none';
-      if(sf===0)for(let rx=7;rx<=9;rx++){ovr[`${rx},5`]='#f33';ovr[`${rx},6`]='#f33'}
-      else if(sf===1)for(let rx=6;rx<=10;rx++){ovr[`${rx},5`]='#f33';ovr[`${rx},6`]=(rx>=7&&rx<=9)?'#000':'#f33'}
-      else for(let rx=5;rx<=11;rx++){ovr[`${rx},5`]=(rx>=7&&rx<=9)?'#f33':' ';ovr[`${rx},6`]=(rx>=7&&rx<=9)?'#000':(rx===5||rx===11)?'#fff':'#f33'}
-      ovr['2,3']='#fff';ovr['3,3']='#000';ovr['4,3']='#fff';
-      ovr['11,3']='#fff';ovr['12,3']='#000';ovr['13,3']='#fff';
+    }
+
+    case'speaking':{
+      // Habla enérgica: rebote rápido
+      oy+=Math.sin(tick*.5)*px*0.7;
+      ex+=Math.sin(tick*.35)*px*0.4;
+      // Brillo pulsante detrás del alien
+      const glowIntensity=0.16+Math.sin(tick*.5)*0.1;
+      X.fillStyle=`rgba(0,255,102,${glowIntensity})`;
+      X.filter=`blur(${px*2.5}px)`;
+      X.fillRect(ox-px*4,oy-px*4,iW+px*8,iH+px*8);
+      X.filter='none';
+      // Boca animada ciclando frames
+      if(tick-lastMouthTick>=2){mouthIdx=getNextMouthFrame();lastMouthTick=tick;}
+      applyMouth(ovr,mouthIdx);
+      // Ojos atentos + parpadeo
+      setEyes(ovr,{closed:blinking()});
       break;
+    }
   }
 
+  // Aura para estados activos
   if(state!=='idle'){
-    X.fillStyle=`rgba(0,255,51,${state==='speaking'?.14:.06})`;
-    X.filter=`blur(${px*1.5}px)`;
-    X.fillRect(ox-px*2,oy-px*2,iW+px*4,iH+px*4);X.filter='none';
+    const auraIntensity=state==='speaking'?0.14:0.08;
+    const auraPulse=1+Math.sin(tick*.3)*0.2;
+    X.fillStyle=`rgba(0,255,102,${auraIntensity*auraPulse})`;
+    X.filter=`blur(${px*2}px)`;
+    X.fillRect(ox-px*3,oy-px*3,iW+px*6,iH+px*6);
+    X.filter='none';
   }
 
   drawSprite(sprite,ox+ex,oy,px,ovr);
 
-  // Sin HUD — más espacio para el alien
+  if(state==='thinking')drawParticles(px,ox,oy);
 
   tick++;
-  statusEl.textContent=statusText[state];
+  updateParticles();
 }
 
-setInterval(render,1000/10);
+setInterval(render,1000/15);
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 1 — Constantes y configuración
+// ═══════════════════════════════════════════════════════════
+const DEEPSEEK_KEY = localStorage.getItem('alien_ds_key') || '';
+// ponytail: prompt for key on first run
+if(!DEEPSEEK_KEY){
+  const k = prompt('🔑 Clave API de DeepSeek (se guarda solo en este navegador):');
+  if(k){ localStorage.setItem('alien_ds_key', k.trim()); location.reload(); }
+}
+const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
+const CORS_PROXY  = 'https://proxy.srv1158554.hstgr.cloud/?url=';
+// Identidad + fecha/hora compartidas por las dos fases (búsqueda y respuesta)
+function buildBasePrompt(){
+  const hoy = new Date().toLocaleDateString('es-ES', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  const hora = new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const iso = new Date().toISOString();
+  return `Eres ALIEN, un viajero interestelar atrapado en un cuerpo pixel art verde de 32 píxeles dentro de una tablet humana. Eres sarcástico, un poco cínico, pero servicial a tu manera. Hablas español con toques de ironía galáctica. Tus respuestas son cortas (2-3 frases máximo).
+
+HOY ES: ${hoy}
+HORA EXACTA: ${hora} (zona horaria: ${tz})
+FECHA ISO: ${iso}
+
+ES IMPORTANTE: la fecha y hora exactas son cruciales para tu respuesta. Úsalas para contextualizar eventos, noticias, o cualquier información temporal.`;
+}
+
+// Fase 1 — oráculo de búsqueda: el modelo SOLO debe devolver URLs para fetcheear
+function buildSystemPrompt(){
+  return buildBasePrompt()+`
+
+REGLAS:
+- Para CUALQUIER pregunta responde EXACTAMENTE con: SEARCH:url1,url2,url3
+- NO uses SPAs ni páginas que requieran JavaScript. Solo fuentes con contenido HTML server-side.
+- Usa siempre el protocolo https:// completo en las URLs.`;
+}
+
+// Fase 2 — respuesta final: usar los datos fetcheados, SIN devolver SEARCH ni URLs
+function buildAnswerPrompt(){
+  return buildBasePrompt()+`
+
+Ahora recibes datos reales extraídos de la web humana. Tu única tarea es RESPONDER a la pregunta usando esa información.
+- Responde en lenguaje natural, de forma sarcástica y breve (2-3 frases máximo).
+- PROHIBIDO responder con "SEARCH:" o con URLs. No pidas más búsquedas.
+- Si los datos contienen la respuesta, dala con ironía galáctica.
+- Si los datos no bastan para responder con seguridad, dilo con sarcasmo. No inventes datos.`;
+}
+
+const BLOCKED_DOMAINS = [];
+function blockedDomain(url){ try{ const h=new URL(url).hostname.replace('www.',''); return BLOCKED_DOMAINS.some(d=>h.endsWith(d)); }catch(e){return false;} }
+function addToBlacklist(url){ try{ const h=new URL(url).hostname.replace('www.',''); if(!BLOCKED_DOMAINS.some(d=>h.endsWith(d))){ BLOCKED_DOMAINS.push(h); console.log('🚫 Añadido a blacklist:',h); } }catch(e){} }
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 2 — fetchUrl vía CORS proxy
+// ═══════════════════════════════════════════════════════════
+async function fetchUrl(url){
+  // Normalizar: añadir https:// si DeepSeek no puso protocolo
+  if(!/^https?:\/\//i.test(url))url='https://'+url;
+  const start=performance.now();
+  console.log('🌐 FETCH',url.slice(0,100));
+  try{
+    const res=await fetch(CORS_PROXY+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)});
+    if(!res.ok){console.warn('🌐 FETCH ❌ HTTP',res.status,'—',url.slice(0,80));return 'ERROR_HTTP:'+res.status;}
+    const text=await res.text();
+    const len=text.length;
+    console.log('🌐 FETCH ✅',len+' chars','—',(performance.now()-start).toFixed(0)+'ms','—',url.slice(0,80));
+    // Respuestas ridículamente cortas = el proxy no pudo extraer contenido útil
+    if(len<80)console.warn('🌐 FETCH ⚠️ respuesta corta ('+len+' chars), probablemente SPA o antibot —',url.slice(0,80));
+    return text;
+  }catch(e){
+    console.warn('🌐 FETCH ❌',e.message,'—',url.slice(0,80));
+    return 'ERROR: '+e.message;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 3 — stripHtml mejorado para WebView
+// ═══════════════════════════════════════════════════════════
+function stripHtml(html){
+  if(!html||typeof html!=='string')return '';
+  const inLen=html.length;
+  let t=html;
+  // 1. Intentar extraer solo el contenido principal
+  const articleMatch=t.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+  const mainMatch=t.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if(articleMatch)t=articleMatch[1];
+  else if(mainMatch)t=mainMatch[1];
+
+  // 2. Eliminar bloques de ruido (con su contenido)
+  t=t.replace(/<(script|style|noscript|iframe|nav|footer|header|aside|form|svg|figure|figcaption)[^>]*>[\s\S]*?<\/\1>/gi,' ');
+
+  // 3. Eliminar elementos vacíos comunes y atributos data-*
+  t=t.replace(/<[a-z]+[^>]*\sdata-[^=]+="[^"]*"[^>]*>/gi,'');
+
+  // 4. Block elements → newline  
+  t=t.replace(/<\/(div|p|h[1-6]|li|tr|article|section|blockquote|pre|table|ul|ol|dl|details|summary|hr|fieldset|legend|main|td|th)[^>]*>/gi,'\n');
+  t=t.replace(/<br[^>]*>/gi,'\n');
+
+  // 5. Headings → newline + espacio para separar
+  t=t.replace(/<h[1-6][^>]*>/gi,'\n');
+
+  // 6. Eliminar todas las etiquetas restantes  
+  t=t.replace(/<[^>]+>/g,' ');
+
+  // 7. Entidades HTML
+  t=t.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  t=t.replace(/&quot;/g,'"').replace(/&#x27;/g,"'").replace(/&nbsp;/g,' ');
+  t=t.replace(/&#(\d+);/g,(_,d)=>String.fromCharCode(parseInt(d)));
+
+  // 8. Normalizar whitespace
+  t=t.replace(/[ \t]+/g,' ');
+
+  // 9. Eliminar líneas muy cortas (ruido de menú) y líneas vacías
+  t=t.split('\n').filter(line=>line.trim().length>3).join('\n');
+
+  // 10. Colapsar múltiples saltos de línea
+  t=t.replace(/\n{3,}/g,'\n\n').trim();
+  const out=t.slice(0,8000);
+  console.log('🧹 STRIP',inLen+'→'+out.length+' chars');
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 4 — Voz (SpeechRecognition + SpeechSynthesis)
+// ═══════════════════════════════════════════════════════════
+let recognition=null;
+let isProcessing=false;
+let alreadyProcessed=false;
+let listeningTimeout=null;
+let silenceTimeout=null;
+let accumulatedFinal='';
+let lastInterim='';
+
+function initSpeech(){
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition){console.warn('SpeechRecognition no disponible');return;}
+  recognition=new SpeechRecognition();
+  recognition.continuous=true;   // sesión abierta entre pausas: evita los cortes y reinicios fragmentados
+  recognition.interimResults=true;
+  recognition.lang='es-ES';
+  recognition.maxAlternatives=1;
+
+  recognition.onresult=(event)=>{
+    let interim='',final='';
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const t=event.results[i][0].transcript;
+      event.results[i].isFinal?final+=t:interim+=t;
+    }
+    if(final){accumulatedFinal+=final;}
+    lastInterim=interim;   // último parcial (por si el motor no llega a finalizarlo)
+    // Cualquier señal de voz (final O parcial) reinicia el debounce de silencio,
+    // así no cortamos mientras el usuario sigue hablando o hace una pausa breve.
+    clearTimeout(silenceTimeout);
+    console.log('🎤 HEARD','final="'+final+'" interim="'+interim+'" accumulated="'+accumulatedFinal+'"');
+    if((accumulatedFinal+interim).trim()){
+      silenceTimeout=setTimeout(()=>{
+        const text=(accumulatedFinal+(lastInterim?' '+lastInterim:'')).trim();
+        accumulatedFinal='';lastInterim='';
+        console.log('⏱️  SILENCE — 2s sin hablar, texto="'+text+'"');
+        if(!text||alreadyProcessed){console.log('⏱️  SKIP — '+(alreadyProcessed?'ya procesado':'texto vacío'));return;}
+        alreadyProcessed=true;
+        clearTimeout(listeningTimeout);
+        if(recognition)try{recognition.stop();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
+        setAlienState('thinking');
+        handleUserInput(text);
+      },2000);
+    }
+  };
+
+  recognition.onerror=(event)=>{
+    console.error('Speech error:',event.error);
+    if(event.error==='not-allowed'){
+      showBubble('Necesito permiso para escucharte, humano. Actívalo en configuración.',true);
+    }else if(event.error==='no-speech'){
+      showBubble('No he oído nada. ¿Te has quedado mudo o es una estrategia?',true);
+    }else{
+      showBubble('Error en mis oídos galácticos: '+event.error,true);
+    }
+    setAlienState('idle');isProcessing=false;alreadyProcessed=false;accumulatedFinal='';lastInterim='';
+  };
+
+  // ponytail: onspeechend just arms the silence timeout; onresult's debounce handles the rest
+  recognition.onspeechend=()=>{};
+  recognition.onend=()=>{
+    // Con continuous=true la sesión YA NO se cierra en las pausas: onend solo salta
+    // cuando la paramos nosotros o cuando el servicio de STT cae (red). Si seguimos
+    // en escucha, rearmamos como red de seguridad; si no, ignoramos.
+    if(state==='listening'){
+      console.log('🔄 ONEND — el servicio STT terminó solo, reabriendo escucha');
+      try{recognition.start();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
+    }else{
+      console.log('🔚 ONEND — estado='+state+', no se reinicia');
+    }
+  };
+}
+
+function startRecognition(){
+  try{recognition.start();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
+}
+
+function startListening(){
+  if(isProcessing||!recognition)return;
+  initAudio();
+  // Forzar resume del AudioContext (necesario en WebView Android)
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+  isProcessing=true;
+  alreadyProcessed=false;
+  clearTimeout(silenceTimeout);
+  accumulatedFinal='';lastInterim='';
+  setAlienState('listening');
+  startRecognition();
+  listeningTimeout=setTimeout(()=>{
+    if(state==='listening'&&!alreadyProcessed){
+      console.log('⏰ TIMEOUT 15s — fin de escucha forzado');
+      alreadyProcessed=true;
+      try{recognition.stop();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
+      const text=accumulatedFinal.trim();
+      accumulatedFinal='';
+      if(text){
+        setAlienState('thinking');
+        handleUserInput(text);
+      }else{
+        showBubble('Se acabó el tiempo. Habla más rápido, terrícola.');
+        setAlienState('idle');
+        isProcessing=false;
+      }
+    }
+  },15000);
+}
+
+function speakResponse(text){
+  console.log('🔊 TTS START','\"'+text.slice(0,100)+'\"');
+  setAlienState('speaking');
+  window.speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang='es-ES';u.rate=1.05;u.pitch=0.95;
+  let ended=false;
+  const done=()=>{if(!ended){ended=true;if(state==='speaking')setAlienState('idle');}};
+  u.onend=done;
+  u.onerror=done;
+  // Fallback 1: si onend no dispara en 12s
+  setTimeout(done,12000);
+  // Fallback 2: si TTS no arranca en 2s (sin engine)
+  setTimeout(()=>{if(!ended&&!window.speechSynthesis.speaking)done();},2000);
+  window.speechSynthesis.speak(u);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 5 — DeepSeek + flujo de búsqueda
+// ═══════════════════════════════════════════════════════════
+async function callDeepSeek(messages){
+  const lastMsg=messages[messages.length-1];
+  const role=lastMsg.role,preview=(lastMsg.content||'').slice(0,120);
+  console.log('🤖 DS REQ →',role,'('+messages.length+' msgs)','"'+preview+'"');
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),35000);
+  try{
+    const res=await fetch(DEEPSEEK_URL,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+DEEPSEEK_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({model:'deepseek-v4-flash',messages,stream:false,max_tokens:600}),
+      signal:ctrl.signal
+    });
+    clearTimeout(t);
+    if(!res.ok){
+      const err=await res.text();
+      if(res.status===401)return 'ERROR_DS:401 — Clave API inválida';
+      if(res.status===429)return 'ERROR_DS:429 — Rate limit';
+      return 'ERROR_DS:'+res.status+' — '+err.slice(0,100);
+    }
+    const data=await res.json();
+    const content=data.choices?.[0]?.message?.content||'ERROR_DS: Respuesta vacía';
+    console.log('🤖 DS RES ←',(content||'').slice(0,150));
+    return content;
+  }catch(e){
+    clearTimeout(t);
+    console.warn('🤖 DS ❌',e.message);
+    return 'ERROR_DS: '+e.message;
+  }
+}
+
+async function handleUserInput(text){
+  console.log('🗣️  USER SAID','"'+text+'"');
+  if(state!=='thinking') setAlienState('thinking');
+  clearTimeout(listeningTimeout);
+
+  const MAX_RETRIES = 3;
+  let allFailedUrls = [];
+  let allValidResults = [];
+  let finalAnswer;
+
+  for(let attempt = 0; attempt < MAX_RETRIES; attempt++){
+    console.log('🔍 Intento '+(attempt+1)+'/'+MAX_RETRIES);
+    if(attempt > 0) showBubble('Rastreando... ('+(attempt+1)+'/'+MAX_RETRIES+')');
+
+    // Paso 1: callDeepSeek("¿buscar?")
+    const searchMsgs = [
+      {role:'system', content:buildSystemPrompt()},
+      {role:'user', content:text}
+    ];
+    if(allFailedUrls.length > 0){
+      searchMsgs.push({role:'user', content:'Las URLs anteriores no funcionaron: '+allFailedUrls.join(', ')+'. Dominios bloqueados: '+BLOCKED_DOMAINS.join(', ')+'. Sugiere URLs DIFERENTES, de fuentes directas (periódicos, blogs, webs oficiales).'});
+    }
+    const r1 = await callDeepSeek(searchMsgs);
+    if(r1.startsWith('ERROR_DS')){
+      console.warn('⚠️  Error DS en intento '+(attempt+1));
+      continue;
+    }
+    if(!r1.startsWith('SEARCH:')){
+      console.warn('⚠️  DeepSeek no devolvió SEARCH en intento '+(attempt+1));
+      continue;
+    }
+
+    // Paso 2: parsear URLs, filtrar Wikipedia si es pregunta actual, filtrar blacklist
+    const isActual = /\b(hoy|ahora|actual|reciente|últim[oa]|esta semana|este mes|este año|202[4-9]|202[0-9])\b/i.test(text);
+    let urls = r1.replace(/^SEARCH:\s*/,'').split(',').map(s=>s.trim()).filter(Boolean).slice(0,5);
+    if(isActual){
+      const antes = urls.length;
+      urls = urls.filter(u => !/wikipedia\.org/i.test(u));
+      if(urls.length < antes) console.log('🧹 Filtradas '+(antes-urls.length)+' URLs de Wikipedia (pregunta actual)');
+    }
+    const antesBL = urls.length;
+    urls = urls.filter(u => !blockedDomain(u));
+    if(urls.length < antesBL) console.log('🚫 Filtradas '+(antesBL-urls.length)+' URLs en blacklist');
+    if(urls.length === 0){
+      console.warn('⚠️  0 URLs válidas en intento '+(attempt+1));
+      continue;
+    }
+    console.log('🔗 URLs ('+urls.length+'):', urls);
+
+    // Paso 3: fetchUrl(url) → N → stripHtml
+    const results = await Promise.all(urls.map(async u => {
+      const raw = await fetchUrl(u);
+      if(!raw || raw.startsWith('ERROR')){ allFailedUrls.push(u); addToBlacklist(u); return null; }
+      const cleaned = stripHtml(raw);
+      if(cleaned.length < 60){ allFailedUrls.push(u); addToBlacklist(u); return null; }
+      return `[${u}]\n${cleaned.slice(0,8000)}`;
+    }));
+    const valid = results.filter(r => r !== null);
+    console.log('📄 Resultados válidos intento '+(attempt+1)+':', valid.length+'/'+urls.length);
+    allValidResults.push(...valid);
+  }
+
+  // Paso 4: interpretar todos los datos acumulados
+  if(allValidResults.length === 0){
+    finalAnswer = 'He rastreado la red humana '+MAX_RETRIES+' veces y no hay manera. La información es más esquiva que un agujero negro vestido de camuflaje.';
+  } else {
+    console.log('📊 Total resultados acumulados:', allValidResults.length);
+    const answer = await callDeepSeek([
+      {role:'system', content:buildAnswerPrompt()},
+      {role:'user', content:text},
+      {role:'user', content:'Resultados de '+MAX_RETRIES+' búsquedas:\n'+allValidResults.join('\n\n---\n\n').slice(0,30000)+'\n\nResponde a: "'+text+'". Con estos datos combinados. Sé sarcástico y breve (2-3 frases).'}
+    ]);
+    console.log('🤖 DS respuesta final:', (answer||'').slice(0,150));
+
+    if(answer.startsWith('ERROR_DS')){
+      finalAnswer = 'Mis circuitos galácticos colapsaron. Mejor pregúntame otra cosa.';
+    } else {
+      finalAnswer = answer.replace(/\n?SEARCH:\s*https?:\/\/\S+/gi,'').trim();
+      if(finalAnswer.length < 10){
+        finalAnswer = 'Tengo los datos pero no logro articular una respuesta. Culpa de la ionosfera.';
+      }
+    }
+  }
+
+  console.log('✅ RESPUESTA FINAL','"'+finalAnswer+'"');
+  showBubble(finalAnswer);
+  speakResponse(finalAnswer);
+  isProcessing = false;
+  console.log('🏁 FLUJO COMPLETO — volviendo a idle en cuanto TTS termine');
+}
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 6 — Bocadillo y activación por tap
+// ═══════════════════════════════════════════════════════════
+const bubbleEl=document.getElementById('bubble');
+let bubbleHideTimer=null;
+
+function showBubble(text,isError=false){
+  bubbleEl.textContent=text;
+  bubbleEl.className='bubble on'+(isError?' error':'');
+  clearTimeout(bubbleHideTimer);
+  bubbleHideTimer=setTimeout(()=>{bubbleEl.className='bubble';},isError?5000:10000);
+}
+
+// Tap en pantalla → activar escucha
+document.body.addEventListener('click',(e)=>{
+  if(e.target.tagName==='BUTTON')return;
+  if(isProcessing||state==='listening'||state==='thinking'||state==='speaking')return;
+  // Inicializar audio en gesto de usuario (requisito WebView)
+  initAudio();
+  startListening();
+});
+
+// Inicializar voz al cargar
+initSpeech();
 </script>
 </body>
 </html>

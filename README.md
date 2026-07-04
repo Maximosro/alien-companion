@@ -1,108 +1,116 @@
-# ALIEN — Companion de búsqueda web por voz
+# ALIEN — Compañero de Voz Pixel Art
 
-> MVP para POCO PAD. Avatar pixel art Space Invaders + voz + LLM.
+Compañero de voz con IA que responde con sarcasmo galáctico. App 100% web: un solo HTML con Canvas 32×32, sintetizador chiptune, Web Speech API y búsqueda web verificada.
 
----
+## Arquitectura
+
+```
+navegador (index.html)
+  ├── Canvas 32×32 · 15fps · 4 estados animados
+  ├── Web Audio API · sintetizador chiptune (square wave)
+  ├── Web Speech API · STT (es-ES) + TTS
+  ├── DeepSeek v4 Flash · api.deepseek.com/v1
+  └── CORS Proxy · 82.112.240.102:3000
+
+VPS Hostinger (proxy)
+  └── Node.js 22 Alpine · Docker + Traefik
+      └── fetchUrl + stripHtml server-side
+      └── User-Agent: Chrome 131 + Accept/Accept-Language
+```
+
+## Flujo de búsqueda
+
+```
+voz → handleUserInput → callDeepSeek → SEARCH:urls → fetchUrl × N → stripHtml → callDeepSeek(datos) → respuesta
+```
+
+### Paso a paso
+
+1. Usuario habla → `SpeechRecognition` captura texto
+2. `handleUserInput` envía pregunta a DeepSeek con fecha y hora exacta
+3. DeepSeek responde con `SEARCH:url1,url2,url3`
+4. Se fetchean las URLs en paralelo vía el CORS proxy
+5. `stripHtml` extrae el contenido relevante de cada página
+6. **Se repiten los pasos 2-5 tres veces**, acumulando todos los resultados
+7. Con todos los datos combinados, se llama a DeepSeek para la respuesta final
+8. El Alien habla la respuesta (TTS) y la muestra en bocadillo
+
+### Reintentos
+
+Siempre 3 batidas. Cada una pide URLs a DeepSeek con feedback de las URLs que fallaron en intentos anteriores. Los resultados de las 3 se acumulan y se envían juntos a DeepSeek para la interpretación final. Si no se consigue ningún resultado en las 3 batidas, se muestra un fallback.
+
+### Blacklist
+
+Lista negra de dominios que crece automáticamente. Arranca vacía. Cuando `fetchUrl` falla (0 caracteres, error de red, respuesta antibot), el dominio se añade automáticamente y nunca se vuelve a consultar. El código filtra las URLs antes de fetchear, sin que DeepSeek necesite saberlo.
+
+### Filtro de actualidad
+
+Si la pregunta contiene palabras de actualidad (`hoy`, `ahora`, `reciente`, `2026`...), las URLs de Wikipedia se descartan antes de fetchear. Para preguntas atemporales, Wikipedia está permitida.
+
+### Prompt del sistema
+
+DeepSeek recibe: identidad de ALIEN, fecha y hora exacta (con zona horaria), y dos reglas: responder con `SEARCH:url1,url2,url3` y no usar SPAs (solo fuentes HTML server-side).
+
+### Contexto
+
+Hasta 8000 caracteres por URL y 30000 caracteres totales enviados a DeepSeek en la interpretación final.
+
+## Módulos
+
+### `buildSystemPrompt()`
+Genera el prompt del sistema con identidad de ALIEN, fecha, hora exacta y zona horaria.
+
+### `handleUserInput(text)`
+Orquesta el flujo completo: 3 batidas de búsqueda + interpretación final.
+
+### `callDeepSeek(messages)`
+Cliente HTTP para DeepSeek v4 Flash. Timeout 35s. Maneja errores 401, 429 y errores de red.
+
+### `fetchUrl(url)`
+Cliente HTTP vía CORS proxy. Timeout 10s. Añade `https://` si falta protocolo.
+
+### `stripHtml(html)`
+Extrae contenido de `<article>` o `<main>`, elimina tags, scripts, navegación y ruido. Trunca a 8000 caracteres.
+
+### `blockedDomain(url)` / `addToBlacklist(url)`
+Filtro de dominios bloqueados. `addToBlacklist` se dispara automáticamente cuando un fetch falla.
+
+### Voz
+- `initSpeech()` — Configura `SpeechRecognition` (es-ES, continuous=false, interimResults=true)
+- `startListening()` — Activa escucha con timeout de 15s y debounce de silencio de 1.5s
+- `speakResponse(text)` — TTS con rate 1.05, pitch 0.95, fallbacks de timeout
+
+### Render
+- Canvas 32×32 a 15fps con escalado pixel-perfect
+- 4 estados: `idle`, `listening`, `thinking`, `speaking`
+- Partículas en estado thinking, aura en speaking, fondo de estrellas animado
+- Sprites: A0 (piernas abiertas), A1 (piernas juntas), ojos con parpadeo, 5 formas de boca
+
+### Audio
+- Sintetizador chiptune con OscillatorNode square wave
+- 24 notas, vibrato, activo solo en estado `thinking`
 
 ## Stack
 
-| Capa | Tecnología | Por qué |
-|------|-----------|---------|
-| **Plataforma** | HTML/JS + Capacitor | El prototipo ya funciona. Empaqueta a APK sin reescribir. |
-| **Voice to Text** | Web Speech API (`SpeechRecognition`) | Gratis, nativa en Android WebView. `lang='es-ES'` |
-| **Text to Voice** | Web Speech API (`SpeechSynthesis`) | Gratis, voces del sistema en español. |
-| **LLM** | Groq (Llama 3 70B) | Gratis (rate limit generoso), rapidísimo, API REST. |
-| **Búsqueda web** | Brave Search API | 2000 consultas/mes gratis, sin censura. |
-| **Avatar** | Canvas 2D pixel art | Ya implementado. 4 estados, chiptune, responsive. |
-| **Audio** | Web Audio API | Sintetizador procedural 8-bit (ya implementado). |
-| **Target** | POCO PAD (Android 13+) | WebView actualizado, pantalla ~8-10". |
-| **Idioma** | Español (`es-ES`) | STT, TTS, LLM, búsqueda — todo en español. |
+| Componente | Tecnología |
+|-----------|-----------|
+| Frontend | JavaScript vanilla, HTML5 Canvas, Web Audio, Web Speech |
+| LLM | DeepSeek v4 Flash (API OpenAI-compatible) |
+| Proxy | Node.js 22, Alpine Linux, Docker, Traefik |
+| VPS | Hostinger KVM 1 (Ubuntu 24.04) |
 
----
+## Desarrollo
 
-## Estados del avatar
+```bash
+# Servir frontend
+python -m http.server 8080
 
-```
-idle      → esperando. Flota suave, patas animadas, ojos normales.
-listening → usuario hablando. Se inclina, antenas parpadean, ojos grandes.
-thinking  → consultando Groq + Brave. Ojos erráticos, "?" flotantes, sonido chiptune.
-speaking  → TTS emitiendo. Vibración, boca roja animada (3 frames), glow.
+# Proxy local (alternativa al VPS)
+node proxy/server.js
 ```
 
----
+Abrir `http://localhost:8080` en navegador. Tocar la pantalla para hablar.
 
-## Flujo MVP
+## Proxy
 
-```
-[Usuario pulsa botón o dice "hey"]
-        ↓
-listening → STT (SpeechRecognition, es-ES)
-        ↓
-thinking → texto → Groq (Llama 3)
-                ↓
-        ¿Necesita buscar en internet?
-           ↓SI              ↓NO
-     Brave Search      Responde directo
-           ↓                ↓
-     Groq formula respuesta final (español)
-                ↓
-speaking → TTS (SpeechSynthesis, voz es-ES)
-        ↓
-idle
-```
-
----
-
-## Prompt del sistema (Groq)
-
-```
-Eres ALIEN, un asistente de voz breve y directo. 
-Hablas español. Respuestas de máximo 2-3 frases.
-Si te preguntan algo que requiere información actual, 
-usa la función de búsqueda web. Sé conciso.
-```
-
----
-
-## Archivos del proyecto
-
-```
-alien-companion/
-├── index.html          # Avatar + UI + CSS (ya existe)
-├── app.js              # STT, TTS, Groq, Brave Search (a implementar)
-├── capacitor.config.json
-└── README.md
-```
-
----
-
-## Próximos pasos
-
-1. Crear `app.js` con:
-   - `SpeechRecognition` (es-ES)
-   - `SpeechSynthesis` (es-ES)
-   - Fetch a Groq API
-   - Fetch a Brave Search API
-   - Máquina de estados conectada al avatar
-2. Probar en navegador
-3. Capacitor: `npx cap init`, `npx cap add android`, `npx cap sync`
-4. APK en POCO PAD
-
----
-
-## APIs necesarias
-
-| API | URL | Key |
-|-----|-----|-----|
-| Groq | `https://api.groq.com/openai/v1/chat/completions` | `GROQ_API_KEY` |
-| Brave Search | `https://api.search.brave.com/res/v1/web/search` | `BRAVE_API_KEY` |
-
----
-
-## Notas
-
-- Usuario hispanohablante — todo en español
-- El sintetizador chiptune se activa solo en `thinking`
-- La UI es 100% responsive, ocupa toda la pantalla
-- Sin dependencias externas de fuentes/CDN (Courier New es system font)
-- Three.js se eliminó — solo Canvas 2D para el avatar
+El proxy CORS está desplegado en `82.112.240.102:3000`. Endpoint: `/?url={encoded_url}`. Devuelve texto limpio (HTML → plain text, JSON → verbatim). User-Agent de Chrome 131 con headers Accept y Accept-Language para evitar bloqueos básicos.

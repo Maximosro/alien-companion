@@ -507,7 +507,7 @@ function buildSystemPrompt(){
   return buildBasePrompt()+`
 
 REGLAS:
-- Para CUALQUIER pregunta responde EXACTAMENTE con: SEARCH:url1,url2,url3
+- Para CUALQUIER pregunta responde EXACTAMENTE con: SEARCH:url1,url2,url3,url4,url5,url6,url7,url8,url9,url10,url11,url12
 - NO uses SPAs ni páginas que requieran JavaScript. Solo fuentes con contenido HTML server-side.
 - Usa siempre el protocolo https:// completo en las URLs.`;
 }
@@ -592,7 +592,7 @@ function stripHtml(html){
 
   // 10. Colapsar múltiples saltos de línea
   t=t.replace(/\n{3,}/g,'\n\n').trim();
-  const out=t.slice(0,8000);
+  const out=t.slice(0,16000);
   console.log('🧹 STRIP',inLen+'→'+out.length+' chars');
   return out;
 }
@@ -735,7 +735,7 @@ async function callDeepSeek(messages){
     const res=await fetch(DEEPSEEK_URL,{
       method:'POST',
       headers:{'Authorization':'Bearer '+DEEPSEEK_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({model:'deepseek-v4-flash',messages,stream:false,max_tokens:600}),
+      body:JSON.stringify({model:'deepseek-v4-flash',messages,stream:false,max_tokens:1500}),
       signal:ctrl.signal
     });
     clearTimeout(t);
@@ -790,7 +790,7 @@ async function handleUserInput(text){
 
     // Paso 2: parsear URLs, filtrar Wikipedia si es pregunta actual, filtrar blacklist
     const isActual = /\b(hoy|ahora|actual|reciente|últim[oa]|esta semana|este mes|este año|202[4-9]|202[0-9])\b/i.test(text);
-    let urls = r1.replace(/^SEARCH:\s*/,'').split(',').map(s=>s.trim()).filter(Boolean).slice(0,5);
+    let urls = r1.replace(/^SEARCH:\s*/,'').split(',').map(s=>s.trim()).filter(Boolean).slice(0,20);
     if(isActual){
       const antes = urls.length;
       urls = urls.filter(u => !/wikipedia\.org/i.test(u));
@@ -811,7 +811,7 @@ async function handleUserInput(text){
       if(!raw || raw.startsWith('ERROR')){ allFailedUrls.push(u); addToBlacklist(u); return null; }
       const cleaned = stripHtml(raw);
       if(cleaned.length < 60){ allFailedUrls.push(u); addToBlacklist(u); return null; }
-      return `[${u}]\n${cleaned.slice(0,8000)}`;
+      return `[${u}]\n${cleaned.slice(0,16000)}`;
     }));
     const valid = results.filter(r => r !== null);
     console.log('📄 Resultados válidos intento '+(attempt+1)+':', valid.length+'/'+urls.length);
@@ -826,7 +826,7 @@ async function handleUserInput(text){
     const answer = await callDeepSeek([
       {role:'system', content:buildAnswerPrompt()},
       {role:'user', content:text},
-      {role:'user', content:'Resultados de '+MAX_RETRIES+' búsquedas:\n'+allValidResults.join('\n\n---\n\n').slice(0,30000)+'\n\nResponde a: "'+text+'". Con estos datos combinados. Sé sarcástico y breve (2-3 frases).'}
+      {role:'user', content:'Resultados de '+MAX_RETRIES+' búsquedas:\n'+allValidResults.join('\n\n---\n\n').slice(0,120000)+'\n\nResponde a: "'+text+'". Con estos datos combinados. Sé sarcástico y breve (2-3 frases).'}
     ]);
     console.log('🤖 DS respuesta final:', (answer||'').slice(0,150));
 

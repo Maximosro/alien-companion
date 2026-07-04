@@ -29,7 +29,7 @@ function stripHtml(html) {
   // Remove short lines (menu noise)
   t = t.split('\n').filter(l => l.trim().length > 3).join('\n');
   t = t.replace(/\n{3,}/g, '\n\n').trim();
-  return t.slice(0, 8000);
+  return t.slice(0, 16000);
 }
 
 function fetchUrl(url, depth) {
@@ -43,7 +43,7 @@ function fetchUrl(url, depth) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
       },
-      timeout: 8000
+      timeout: 12000
     }, (res) => {
       // Seguir redirecciones
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {

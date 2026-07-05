@@ -7,6 +7,8 @@
 <title>ALIEN — 32×32</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
+  :root{--accent:#33ff33;--accent-bright:#66ff66;--accent-rgb:51,255,51;--accent-bright-rgb:102,255,102}
+  body.search{--accent:#ff3333;--accent-bright:#ff6666;--accent-rgb:255,51,51;--accent-bright-rgb:255,102,102}
   html,body{width:100vw;height:100vh;height:100dvh;overflow:hidden;background:#000}
   body{
     display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -25,26 +27,14 @@
     z-index:10;pointer-events:none;
   }
   .ui-layer>*{pointer-events:auto}
-  .title{color:#0f0;font-size:clamp(28px,8vw,64px);font-weight:bold;letter-spacing:clamp(8px,2vw,20px);text-shadow:0 0 24px rgba(0,255,0,.6),0 0 60px rgba(0,255,0,.2)}
-  .status{color:rgba(0,255,0,.4);font-size:clamp(12px,2.5vw,18px);letter-spacing:clamp(4px,1vw,8px);margin:8px 0 12px}
-  .btns{display:flex;gap:clamp(6px,1.5vw,14px);flex-wrap:wrap;justify-content:center}
-  button{
-    padding:clamp(12px,2vh,18px) clamp(18px,4vw,32px);
-    border:2px solid #080;cursor:pointer;
-    font-family:'Courier New',monospace;
-    font-size:clamp(14px,3vw,22px);font-weight:bold;
-    color:#080;background:#000;letter-spacing:2px;
-    text-transform:uppercase;
-    -webkit-tap-highlight-color:transparent;touch-action:manipulation;
-  }
-  button.on{color:#0f0;border-color:#0f0;background:#010;box-shadow:0 0 20px rgba(0,255,0,.3),inset 0 0 10px rgba(0,255,0,.1)}
-  .bubble{position:fixed;top:6%;left:50%;transform:translateX(-50%);max-width:88vw;padding:18px 28px;background:rgba(0,12,0,0.93);border:2px solid #0f0;color:#0f0;font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s;box-shadow:0 0 18px rgba(0,255,0,.25);border-radius:4px;line-height:1.5;pointer-events:none}
-  .bubble::after{content:'';position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-top:8px solid #0f0}
+  .title{color:var(--accent);font-size:clamp(28px,8vw,64px);font-weight:bold;letter-spacing:clamp(8px,2vw,20px);text-shadow:0 0 24px rgba(var(--accent-rgb),.6),0 0 60px rgba(var(--accent-rgb),.2)}
+  .status{color:rgba(var(--accent-rgb),.4);font-size:clamp(12px,2.5vw,18px);letter-spacing:clamp(4px,1vw,8px);margin:8px 0 12px}
+  .bubble{position:fixed;top:6%;left:50%;transform:translateX(-50%);max-width:88vw;padding:18px 28px;background:rgba(0,0,0,0.93);border:2px solid var(--accent);color:var(--accent);font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s,border-color 0.4s,color 0.4s,box-shadow 0.4s;box-shadow:0 0 18px rgba(var(--accent-rgb),.25);border-radius:4px;line-height:1.5;pointer-events:none}
+  .bubble::after{content:'';position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-top:8px solid var(--accent)}
   .bubble.on{opacity:1}
   .bubble.error{border-color:#f44;color:#f66;box-shadow:0 0 18px rgba(255,68,68,.3)}
   .bubble.error::after{border-top-color:#f44}
-  /* El reloj (fecha + hora) se dibuja en el canvas con fuente pixel art 5×7 */
-  #btn-simple.on,#btn-search.on{color:#0f0;border-color:#0f0;background:#010;box-shadow:0 0 20px rgba(0,255,0,.3),inset 0 0 10px rgba(0,255,0,.1)}
+  /* Reloj y etiquetas SIMPLE/SEARCH se dibujan en el canvas (pixel art 5×7) */
 </style>
 </head>
 <body>
@@ -53,10 +43,6 @@
 <div class="ui-layer">
   <div class="title">ALIEN</div>
   <div class="status" id="status">> IDLE</div>
-  <div class="btns">
-    <button id="btn-simple" class="on">SIMPLE</button>
-    <button id="btn-search">SEARCH</button>
-  </div>
 </div>
 
 <script>
@@ -70,18 +56,23 @@ function resize(){
 window.addEventListener('resize',resize);
 resize();
 
-// ═══════════════════ PALETA — Solo verdes ═══════════════════
-// Se eliminó rojo, rosa, amarillo y cyan. Todo el modelo usa verdes.
-const COL={
+// ═══════════════════ PALETA — Verde (SIMPLE) / Rojo (SEARCH) ═══════════════════
+// Dos paletas paralelas. El alien, los efectos y la UI cambian de color
+// según el modo: SIMPLE = verdes (calma), SEARCH = rojos (alerta/búsqueda).
+const PAL_GREEN={
   bg:'#000000',
-  green:'#33ff33',   // cuerpo (verde medio)
-  light:'#66ff66',   // cabeza / brazos (verde claro)
-  pale:'#ccffcc',    // ojos (verde muy pálido)
-  teeth:'#aaffaa',   // dientes / antenas (verde pálido)
-  dark:'#1a8c1a',    // cuerpo inferior (verde oscuro)
-  dark2:'#0f5c0f',   // piernas (verde muy oscuro)
-  black:'#031503'    // pupilas / interior de boca (verde-negro)
+  green:'#33ff33', light:'#66ff66', pale:'#ccffcc', teeth:'#aaffaa',
+  dark:'#1a8c1a', dark2:'#0f5c0f', black:'#031503',
+  rgb:[51,255,51], rgbBright:[102,255,102], rgbPale:[170,255,170]
 };
+const PAL_RED={
+  bg:'#000000',
+  green:'#ff3333', light:'#ff6666', pale:'#ffcccc', teeth:'#ffaaaa',
+  dark:'#8c1a1a', dark2:'#5c0f0f', black:'#150303',
+  rgb:[255,51,51], rgbBright:[255,102,102], rgbPale:[255,170,170]
+};
+let COL=PAL_GREEN;   // paleta activa (se intercambia al cambiar de modo)
+function rgba(arr,a){return 'rgba('+arr[0]+','+arr[1]+','+arr[2]+','+a+')';}
 
 // ═══════════════════ AUDIO — Sintetizador Chiptune ═══════════════════
 let audioCtx=null;
@@ -152,21 +143,19 @@ function stopAllSound(){
 
 // ═══════════════════ ESTADOS ═══════════════════
 let state='idle',tick=0,prevState='idle';
-let searchMode=false; // false=SIMPLE (sin search), true=SEARCH (con search)
-const btnSimple=document.getElementById('btn-simple');
-const btnSearch=document.getElementById('btn-search');
+let searchMode=false; // false=SIMPLE (verde), true=SEARCH (rojo)
 
-// Toggle modo búsqueda manual
-btnSimple.onclick=()=>{
-  searchMode=false;
-  btnSimple.classList.add('on');
-  btnSearch.classList.remove('on');
-};
-btnSearch.onclick=()=>{
-  searchMode=true;
-  btnSearch.classList.add('on');
-  btnSimple.classList.remove('on');
-};
+// Cambia de modo: paleta del alien + color de la UI + clase del body
+function setSearchMode(on){
+  searchMode=on;
+  COL=on?PAL_RED:PAL_GREEN;
+  document.body.classList.toggle('search',on);
+  console.log('🎨 MODO',on?'SEARCH (rojo)':'SIMPLE (verde)');
+}
+
+// Feedback visual al pulsar una mitad de pantalla (decae cada frame)
+const sideFlash={left:0,right:0};
+function flashSide(side){sideFlash[side]=1;}
 
 function setAlienState(newState){
   if(state===newState)return;
@@ -285,7 +274,7 @@ function updateParticles(){
 }
 function drawParticles(px,ox,oy){
   particles.forEach(p=>{
-    X.fillStyle=`rgba(170,255,170,${p.life*0.7})`;
+    X.fillStyle=rgba(COL.rgbPale,p.life*0.7);
     X.fillRect(ox+p.x*px,oy+p.y*px,p.size*px*0.4,p.size*px*0.4);
   });
 }
@@ -396,6 +385,7 @@ const GLYPH={
   'E':['#####','#    ','#    ','#### ','#    ','#    ','#####'],
   'F':['#####','#    ','#    ','#### ','#    ','#    ','#    '],
   'G':[' ### ','#   #','#    ','#  ##','#   #','#   #',' ### '],
+  'H':['#   #','#   #','#   #','#####','#   #','#   #','#   #'],
   'I':[' ### ','  #  ','  #  ','  #  ','  #  ','  #  ',' ### '],
   'J':['  ###','   # ','   # ','   # ','#  # ','#  # ',' ##  '],
   'L':['#    ','#    ','#    ','#    ','#    ','#    ','#####'],
@@ -416,16 +406,68 @@ function textW(txt,scale){
   for(const ch of up)w+=(GLYPH[ch]?6:3)*scale;
   return w;
 }
-function drawGlyph(ch,x,y,scale,color){
+function paintGlyph(ctx,ch,x,y,scale,color){
   const g=GLYPH[ch];if(!g)return;
-  X.fillStyle=color;
+  ctx.fillStyle=color;
   for(let r=0;r<g.length;r++)for(let c=0;c<g[r].length;c++)
-    if(g[r][c]==='#')X.fillRect(x+c*scale,y+r*scale,scale,scale);
+    if(g[r][c]==='#')ctx.fillRect(x+c*scale,y+r*scale,scale,scale);
 }
+function drawGlyph(ch,x,y,scale,color){paintGlyph(X,ch,x,y,scale,color);}
 function drawText(txt,x,y,scale,color){
   let cx=x;const up=(''+txt).toUpperCase();
   for(const ch of up){drawGlyph(ch,cx,y,scale,color);cx+=(GLYPH[ch]?6:3)*scale;}
   return cx;
+}
+
+// ── Etiquetas de modo pre-renderizadas (pixel art difuminado) ──
+// Se dibujan una vez (SIMPLE verde / SEARCH rojo) y se reutilizan cada frame.
+function prerenderLabel(text,color){
+  const sc=16,w=textW(text,sc),h=7*sc;
+  const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+  const ctx=cv.getContext('2d');
+  let cx=0;const up=(''+text).toUpperCase();
+  for(const ch of up){paintGlyph(ctx,ch,cx,0,sc,color);cx+=(GLYPH[ch]?6:3)*sc;}
+  return cv;
+}
+const lblSimple=prerenderLabel('SIMPLE',PAL_GREEN.pale);
+const lblSearch=prerenderLabel('SEARCH',PAL_RED.pale);
+
+// Dibuja una etiqueta difuminada (halo + núcleo) con alpha variable
+function drawLabel(src,x,y,w,h,blur,alpha){
+  if(alpha<=0.01)return;
+  X.save();
+  X.globalAlpha=Math.min(1,alpha);
+  X.filter=`blur(${blur}px)`;
+  X.drawImage(src,x,y,w,h);
+  X.globalAlpha=Math.min(1,alpha*0.9);
+  X.filter=`blur(${Math.max(1,blur*0.3)}px)`;
+  X.drawImage(src,x,y,w,h);
+  X.restore();
+}
+
+// Etiquetas SIMPLE (izq) / SEARCH (der) detrás del alien + feedback de pulso.
+// Cada mitad "posee" la mitad de pantalla; el alien se dibuja encima.
+function drawModeLabels(W,H,cy){
+  const scale=Math.max(4,Math.floor(Math.min(W*0.42/36,H*0.13/7)));
+  const blur=Math.max(2,Math.round(scale*0.45));
+  const w=36*scale,h=7*scale,y=cy-h/2;
+  const pulse=0.5+Math.sin(tick*0.1)*0.08;  // la mitad activa palpita
+  drawLabel(lblSimple,W/4-w/2,    y,w,h,blur,(!searchMode?pulse:0.16)+sideFlash.left*0.5);
+  drawLabel(lblSearch,3*W/4-w/2,  y,w,h,blur,( searchMode?pulse:0.16)+sideFlash.right*0.5);
+  // Glow lateral al pulsar (feedback claro de qué mitad se tocó)
+  if(sideFlash.left>0.02){
+    const g=X.createLinearGradient(0,0,W/2,0);
+    g.addColorStop(0,rgba(PAL_GREEN.rgb,sideFlash.left*0.32));
+    g.addColorStop(1,rgba(PAL_GREEN.rgb,0));
+    X.fillStyle=g;X.fillRect(0,0,W/2,H);
+  }
+  if(sideFlash.right>0.02){
+    const g=X.createLinearGradient(W,0,W/2,0);
+    g.addColorStop(0,rgba(PAL_RED.rgb,sideFlash.right*0.32));
+    g.addColorStop(1,rgba(PAL_RED.rgb,0));
+    X.fillStyle=g;X.fillRect(W/2,0,W/2,H);
+  }
+  sideFlash.left*=0.90;sideFlash.right*=0.90;
 }
 
 // ═══════════════════ BUCLE DE RENDER ═══════════════════
@@ -450,7 +492,7 @@ function render(){
   for(const s of stars){
     s.y-=s.sp;if(s.y<-5){s.y=H+5;s.rx=Math.random()}
     const sx=s.rx*W,a=.3+Math.sin(tick*.04+s.ph)*.3;
-    X.fillStyle=`rgba(0,255,51,${a})`;
+    X.fillStyle=rgba(COL.rgb,a);
     const sr=Math.max(1,px/3);
     X.fillRect(Math.round(sx),Math.round(s.y),sr,sr);
   }
@@ -472,18 +514,37 @@ function render(){
   hx+=6*tsH;
   drawText(cMM,hx,horaY,tsH,COL.green);
 
+  // ── Etiquetas de modo (SIMPLE izq / SEARCH der) difuminadas tras el alien ──
+  drawModeLabels(W,H,cy);
+
   // ── Selección de frame (marcha) según estado ──
-  const marchSpeed=state==='speaking'?0.22:state==='listening'?0.18:0.08;
+  const marchSpeed=state==='speaking'?0.22:state==='listening'?0.18:(searchMode?0.14:0.08);
   const anim=Math.floor(tick*marchSpeed)%2;
   const sprite=anim===0?A0:A1;
   const ovr={};
 
   switch(state){
     case'idle':{
-      // Respiración suave de dos frecuencias + micro balanceo
-      oy+=Math.sin(tick*.04)*px*1.5+Math.sin(tick*.07)*px*0.3;
-      ex+=Math.sin(tick*.08)*px*0.12;
-      setEyes(ovr,{closed:blinking()});
+      if(searchMode){
+        // SEARCH: alerta — temblor nervioso, ojos escaneando y barrido ráfego
+        oy+=Math.sin(tick*.12)*px*0.8+Math.sin(tick*1.3)*px*0.18;
+        ex+=Math.sin(tick*.2)*px*0.2+Math.sin(tick*1.7)*px*0.12;
+        setEyes(ovr,{dx:Math.round(Math.sin(tick*.18)*1.5),color:COL.pale,closed:blinking()});
+        // Barrido ráfego detrás del alien (señal de "buscando")
+        const ang=(tick*0.05)%(Math.PI*2),reach=Math.min(W,H)*0.48;
+        X.save();X.translate(cx,cy);X.rotate(ang);
+        const gr=X.createLinearGradient(0,0,reach,0);
+        gr.addColorStop(0,rgba(COL.rgbBright,0.5));gr.addColorStop(1,rgba(COL.rgbBright,0));
+        X.fillStyle=gr;X.beginPath();X.moveTo(0,0);X.arc(0,0,reach,-0.6,0.6);X.closePath();X.fill();
+        X.strokeStyle=rgba(COL.rgbBright,0.65);X.lineWidth=Math.max(1,px*0.4);
+        X.beginPath();X.moveTo(0,0);X.lineTo(reach,0);X.stroke();
+        X.restore();
+      }else{
+        // SIMPLE: respiración suave de dos frecuencias + micro balanceo
+        oy+=Math.sin(tick*.04)*px*1.5+Math.sin(tick*.07)*px*0.3;
+        ex+=Math.sin(tick*.08)*px*0.12;
+        setEyes(ovr,{closed:blinking()});
+      }
       break;
     }
 
@@ -497,7 +558,7 @@ function render(){
       for(let i=0;i<3;i++){
         const t=((tick*0.6+i*14)%42)/42;
         const r=t*Math.min(W,H)*0.38;
-        X.strokeStyle=`rgba(0,255,102,${(1-t)*0.45})`;
+        X.strokeStyle=rgba(COL.rgbBright,(1-t)*0.45);
         X.lineWidth=Math.max(1,Math.round(px*0.4));
         X.strokeRect(cx-r,cy-r,r*2,r*2);
       }
@@ -533,7 +594,7 @@ function render(){
       ex+=Math.sin(tick*.35)*px*0.4;
       // Brillo pulsante detrás del alien
       const glowIntensity=0.16+Math.sin(tick*.5)*0.1;
-      X.fillStyle=`rgba(0,255,102,${glowIntensity})`;
+      X.fillStyle=rgba(COL.rgbBright,glowIntensity);
       X.filter=`blur(${px*2.5}px)`;
       X.fillRect(ox-px*4,oy-px*4,iW+px*8,iH+px*8);
       X.filter='none';
@@ -550,7 +611,7 @@ function render(){
   if(state!=='idle'){
     const auraIntensity=state==='speaking'?0.14:0.08;
     const auraPulse=1+Math.sin(tick*.3)*0.2;
-    X.fillStyle=`rgba(0,255,102,${auraIntensity*auraPulse})`;
+    X.fillStyle=rgba(COL.rgbBright,auraIntensity*auraPulse);
     X.filter=`blur(${px*2}px)`;
     X.fillRect(ox-px*3,oy-px*3,iW+px*6,iH+px*6);
     X.filter='none';
@@ -852,12 +913,13 @@ function showBubble(text,isError=false){
   bubbleHideTimer=setTimeout(()=>{bubbleEl.className='bubble';},isError?5000:10000);
 }
 
-// Tap en pantalla → activar escucha
+// Tap en pantalla → elige modo (mitad izq=SIMPLE / der=SEARCH) y escucha
 document.body.addEventListener('click',(e)=>{
-  if(e.target.tagName==='BUTTON')return;
   if(isProcessing||state==='listening'||state==='thinking'||state==='speaking')return;
-  // Inicializar audio en gesto de usuario (requisito WebView)
-  initAudio();
+  const left=e.clientX<window.innerWidth/2;
+  setSearchMode(!left);                 // izq=SIMPLE(verde), der=SEARCH(rojo)
+  flashSide(left?'left':'right');       // feedback visual de la mitad pulsada
+  initAudio();                          // inicializar audio en gesto de usuario (WebView)
   startListening();
 });
 

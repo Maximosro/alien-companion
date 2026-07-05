@@ -142,7 +142,7 @@ function stopAllSound(){
 }
 
 // ═══════════════════ ESTADOS ═══════════════════
-let state='idle',tick=0,prevState='idle';
+let state='idle',tick=0,prevState='idle',ttsStartTick=-999;
 let searchMode=false; // false=SIMPLE (verde), true=SEARCH (rojo)
 
 // Cambia de modo: paleta del alien + color de la UI + clase del body
@@ -163,6 +163,7 @@ function setAlienState(newState){
   prevState=state;state=newState;
   if(newState==='thinking'&&prevState!=='thinking')startThinkSound();
   else if(newState!=='thinking')stopAllSound();
+  if(newState!=='speaking')ttsStartTick=-999;  // resetear al salir de speaking
   statusEl.textContent=statusText[newState];
 }
 
@@ -603,6 +604,14 @@ function render(){
       applyMouth(ovr,mouthIdx);
       // Ojos atentos + parpadeo
       setEyes(ovr,{closed:blinking()});
+      // Polling: mantener animación sincronizada con el audio real del TTS
+      // Verificar cada ~533ms (8 frames a 15fps) tras 500ms de margen post-arranque
+      if(tick%8===0&&tick-ttsStartTick>7){
+        if(window.speechSynthesis&&!window.speechSynthesis.speaking){
+          console.log('🔊 TTS polling: audio terminado, volviendo a idle');
+          setAlienState('idle');
+        }
+      }
       break;
     }
   }
@@ -638,6 +647,24 @@ if(!GEMINI_KEY){
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 const GEMINI_TIMEOUT_MS = 20000;
 
+// ── Configuración del LLM local (LM Studio / OpenAI-compatible) ──
+const LOCAL_LLM_TIMEOUT_MS = 60000; // modelos reasoning tardan más
+// Conexión directa al servidor Gemma 4 12B en red local (CORS enabled en LM Studio)
+const LOCAL_LLM_DEFAULT_URL = 'http://192.168.1.136:1234/v1/chat/completions';
+const LOCAL_LLM_DEFAULT_MODEL = 'google/gemma-4-12b-qat';
+
+function getConfig(key, defaultValue) {
+  return localStorage.getItem(key) || defaultValue;
+}
+
+// Resuelve la config sin preguntar — usa defaults cableados si no hay override en localStorage
+function resolveLocalLLMConfig() {
+  return {
+    endpoint: getConfig('alien_llm_endpoint', LOCAL_LLM_DEFAULT_URL),
+    model: getConfig('alien_llm_model', LOCAL_LLM_DEFAULT_MODEL)
+  };
+}
+
 // Prompt único del sistema: identidad ALIEN + fecha/hora
 function buildAlienPrompt(){
   const TZ='Europe/Madrid';
@@ -653,6 +680,19 @@ FECHA ISO: ${iso}
 IMPORTANTE: La fecha y hora exactas son CRUCIALES para tus búsquedas en internet. Cuando uses Google Search, INCLUYE SIEMPRE la fecha (${hoy}) en los términos de búsqueda para obtener resultados actualizados. Si el usuario pregunta por eventos "de ayer", "de hoy", "de esta semana" o "recientes", calcula la fecha correcta a partir de la fecha actual y búscala explícitamente.
 
 Busca en internet información actualizada si la pregunta lo requiere. Responde SIEMPRE con datos reales, no inventes. Si no encuentras información fiable, dilo con sarcasmo.`;
+}
+
+// Prompt para el LLM local (SIMPLE): misma identidad, sin búsqueda, más permisivo
+function buildSimplePrompt() {
+  const TZ = 'Europe/Madrid';
+  const hoy = new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: TZ });
+  const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: TZ });
+  return `Eres ALIEN, un viajero interestelar atrapado en un cuerpo pixel art verde de 32 píxeles dentro de una tablet humana. Eres sarcástico, un poco cínico, pero servicial a tu manera. Hablas español con toques de ironía galáctica. Tus respuestas son cortas (2-3 frases máximo).
+
+NO puedes buscar información en internet. Responde solo con lo que sabes o con sentido del humor galáctico. Si no sabes algo, puedes inventar una respuesta divertida o admitir tu ignorancia con sarcasmo.
+
+HOY ES: ${hoy}
+HORA EXACTA: ${hora} (zona horaria: ${TZ})`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -764,20 +804,24 @@ function startListening(){
 }
 
 function speakResponse(text){
+  if(!window.speechSynthesis){console.warn('🔊 TTS no disponible');return;}
   console.log('🔊 TTS START','\"'+text.slice(0,100)+'\"');
   setAlienState('speaking');
   window.speechSynthesis.cancel();
   const u=new SpeechSynthesisUtterance(text);
   u.lang='es-ES';u.rate=1.05;u.pitch=0.95;
-  let ended=false;
-  const done=()=>{if(!ended){ended=true;if(state==='speaking')setAlienState('idle');}};
-  u.onend=done;
-  u.onerror=done;
-  // Fallback 1: si onend no dispara en 12s
-  setTimeout(done,12000);
-  // Fallback 2: si TTS no arranca en 2s (sin engine)
-  setTimeout(()=>{if(!ended&&!window.speechSynthesis.speaking)done();},2000);
+  // onend ya NO controla el estado — el polling en el render loop lo hace
+  u.onend=()=>console.log('🔊 TTS onend');
+  u.onerror=(e)=>{
+    console.warn('🔊 TTS onerror',e.error||e);
+    if(state==='speaking')setAlienState('idle');
+  };
+  // Fallback: si TTS no arranca en 2s (sin engine), salir de speaking
+  setTimeout(()=>{
+    if(state==='speaking'&&!window.speechSynthesis.speaking)setAlienState('idle');
+  },2000);
   window.speechSynthesis.speak(u);
+  ttsStartTick=tick;  // marcar tick de inicio para el polling del render loop
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -850,6 +894,65 @@ async function callGemini(userPrompt){
   }
 }
 
+// ── LLM local: llama a LM Studio (API OpenAI-compatible) ──
+async function callLocalLLM(userPrompt) {
+  const { endpoint, model } = resolveLocalLLMConfig();
+  const systemPrompt = buildSimplePrompt();
+  const preview = userPrompt.slice(0, 120);
+
+  console.log('🤖 LOCAL LLM REQ →', '"' + preview + '"', 'endpoint:', endpoint, 'model:', model);
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), LOCAL_LLM_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 1024  // margen para reasoning tokens del modelo
+      }),
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('🤖 LOCAL LLM ❌ HTTP ' + res.status, errText.slice(0, 150));
+      return { text: 'ERROR:' + res.status + ' — ' + errText.slice(0, 100), grounding: null };
+    }
+
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content || '';
+    console.log('🤖 LOCAL LLM RES ←', text.slice(0, 150));
+    return { text, grounding: null };
+
+  } catch (e) {
+    clearTimeout(t);
+    console.warn('🤖 LOCAL LLM ❌', e.message);
+    if (e.name === 'AbortError') return { text: 'ERROR:Timeout — El modelo local tardó demasiado. ¿Está LM Studio corriendo?', grounding: null };
+    if (e.message && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
+      return { text: 'ERROR:Connection — No puedo conectar con LM Studio. Verifica que esté corriendo.', grounding: null };
+    }
+    return { text: 'ERROR: ' + e.message, grounding: null };
+  }
+}
+
+// ── Dispatcher: elige backend según el modo ──
+async function callLLM(userPrompt) {
+  if (searchMode) {
+    return callGemini(userPrompt);
+  } else {
+    return callLocalLLM(userPrompt);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // MÓDULO 4 — Flujo de conversación (Gemini directo)
 // ═══════════════════════════════════════════════════════════
@@ -858,8 +961,8 @@ async function handleUserInput(text){
   if(state!=='thinking') setAlienState('thinking');
   clearTimeout(listeningTimeout);
 
-  // ── Una sola llamada: Gemini busca, recupera y responde ──
-  const { text: rawAnswer, grounding } = await callGemini(text);
+  // ── Una sola llamada: dispatcher al backend según modo (local LLM o Gemini) ──
+  const { text: rawAnswer, grounding } = await callLLM(text);
 
   // ── Procesar respuesta ──
   let finalAnswer;
@@ -870,6 +973,8 @@ async function handleUserInput(text){
       finalAnswer = 'Mi llave galáctica no funciona. Dile a mi ingeniero que revise la API key de Gemini.';
     } else if(errCode === '429'){
       finalAnswer = 'He hecho demasiadas preguntas a la red humana. Espera un rato antes de consultarme otra vez.';
+    } else if(errCode === 'Connection'){
+      finalAnswer = 'No encuentro mi ordenador local. ¿Has encendido LM Studio? Revisa la configuración.';
     } else if(errCode === 'Timeout'){
       finalAnswer = 'La red humana va muy lenta. Ni con motores warp llego a tiempo. Pregúntame otra vez.';
     } else {

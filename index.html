@@ -477,142 +477,34 @@ function render(){
 setInterval(render,1000/15);
 
 // ═══════════════════════════════════════════════════════════
-// MÓDULO 1 — Constantes y configuración
+// MÓDULO 1 — Constantes y configuración (Gemini)
 // ═══════════════════════════════════════════════════════════
-const DEEPSEEK_KEY = localStorage.getItem('alien_ds_key') || '';
-// ponytail: prompt for key on first run
-if(!DEEPSEEK_KEY){
-  const k = prompt('🔑 Clave API de DeepSeek (se guarda solo en este navegador):');
-  if(k){ localStorage.setItem('alien_ds_key', k.trim()); location.reload(); }
+const GEMINI_KEY = localStorage.getItem('alien_gemini_key') || '';
+if(!GEMINI_KEY){
+  const k = prompt('🔑 Clave API de Gemini (Google AI Studio). Se guarda solo en este navegador:');
+  if(k){ localStorage.setItem('alien_gemini_key', k.trim()); location.reload(); }
 }
-const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
-function resolveProxyUrl(){
-  try {
-    if(localStorage.getItem('alien_use_local_proxy') === 'false') return 'https://proxy.srv1158554.hstgr.cloud/?url=';
-  } catch(e) { /* localStorage bloqueado, usar local por defecto */ }
-  return 'http://localhost:3000/?url=';
-}
-// Identidad + fecha/hora compartidas por las dos fases (búsqueda y respuesta)
-function buildBasePrompt(){
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEMINI_TIMEOUT_MS = 20000;
+
+// Prompt único del sistema: identidad ALIEN + fecha/hora
+function buildAlienPrompt(){
   const hoy = new Date().toLocaleDateString('es-ES', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
   const hora = new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const iso = new Date().toISOString();
-  return `Eres ALIEN, un viajero interestelar atrapado en un cuerpo pixel art verde de 32 píxeles dentro de una tablet humana. Eres sarcástico, un poco cínico, pero servicial a tu manera. Hablas español con toques de ironía galáctica. Tus respuestas son cortas (2-3 frases máximo).
+  return `Eres ALIEN, un viajero interestelar atrapado en un cuerpo pixel art verde de 32 píxeles dentro de una tablet humana. Eres sarcástico, un poco cínico, pero servicial a tu manera. Hablas español con toques de ironía galáctica. Tus respuestas son cortas (2-3 frases máximo). NO incluyas URLs ni enlaces en tu respuesta.
 
 HOY ES: ${hoy}
 HORA EXACTA: ${hora} (zona horaria: ${tz})
-FECHA ISO: ${iso}
+FECHA ISO: ${new Date().toISOString()}
 
-ES IMPORTANTE: la fecha y hora exactas son cruciales para tu respuesta. Úsalas para contextualizar eventos, noticias, o cualquier información temporal.`;
-}
+IMPORTANTE: La fecha y hora exactas son CRUCIALES para tus búsquedas en internet. Cuando uses Google Search, INCLUYE SIEMPRE la fecha (${hoy}) en los términos de búsqueda para obtener resultados actualizados. Si el usuario pregunta por eventos "de ayer", "de hoy", "de esta semana" o "recientes", calcula la fecha correcta a partir de la fecha actual y búscala explícitamente.
 
-// Fase 1 — oráculo de búsqueda: el modelo SOLO debe devolver URLs para fetcheear
-function buildSystemPrompt(){
-  return buildBasePrompt()+`
-
-REGLAS:
-- Para CUALQUIER pregunta responde EXACTAMENTE con: SEARCH:url1,url2,url3,url4,url5,url6,url7,url8,url9,url10,url11,url12
-- NO uses SPAs ni páginas que requieran JavaScript. Solo fuentes con contenido HTML server-side.
-- Usa siempre el protocolo https:// completo en las URLs.`;
-}
-
-// Fase 2 — respuesta final: usar los datos fetcheados, SIN devolver SEARCH ni URLs
-function buildAnswerPrompt(){
-  return buildBasePrompt()+`
-
-Ahora recibes datos reales extraídos de la web humana. Tu única tarea es RESPONDER a la pregunta usando esa información.
-- Responde en lenguaje natural, de forma sarcástica y breve (2-3 frases máximo).
-- PROHIBIDO responder con "SEARCH:" o con URLs. No pidas más búsquedas.
-- Si los datos contienen la respuesta, dala con ironía galáctica.
-- Si los datos no bastan para responder con seguridad, dilo con sarcasmo. No inventes datos.`;
-}
-
-// Cargar blacklist persistente (localStorage). Si no hay nada o falla, empezar vacío.
-let BLOCKED_DOMAINS;
-try {
-  const stored = localStorage.getItem('alien_blocked_domains');
-  const parsed = stored ? JSON.parse(stored) : [];
-  BLOCKED_DOMAINS = Array.isArray(parsed) ? parsed : [];
-} catch(e) {
-  BLOCKED_DOMAINS = [];
-}
-console.log('🚫 Blacklist cargada:', BLOCKED_DOMAINS.length, 'dominios');
-function blockedDomain(url){ try{ const h=new URL(url).hostname.replace('www.',''); return BLOCKED_DOMAINS.some(d=>h.endsWith(d)); }catch(e){return false;} }
-function addToBlacklist(url){ try{ const h=new URL(url).hostname.replace('www.',''); if(!BLOCKED_DOMAINS.some(d=>h.endsWith(d))){ BLOCKED_DOMAINS.push(h); try{ localStorage.setItem('alien_blocked_domains',JSON.stringify(BLOCKED_DOMAINS)); }catch(lsError){ console.warn('⚠️ No se pudo guardar blacklist en localStorage:',lsError.message); } console.log('🚫 Añadido a blacklist:',h); } }catch(e){ console.warn('addToBlacklist error:', e.message); } }
-
-// ═══════════════════════════════════════════════════════════
-// MÓDULO 2 — fetchUrl vía CORS proxy
-// ═══════════════════════════════════════════════════════════
-async function fetchUrl(url){
-  // Normalizar: añadir https:// si DeepSeek no puso protocolo
-  if(!/^https?:\/\//i.test(url))url='https://'+url;
-  const start=performance.now();
-  console.log('🌐 FETCH',url.slice(0,100));
-  try{
-    const res=await fetch(resolveProxyUrl()+encodeURIComponent(url),{signal:AbortSignal.timeout(10000)});
-    if(!res.ok){console.warn('🌐 FETCH ❌ HTTP',res.status,'—',url.slice(0,80));return 'ERROR_HTTP:'+res.status;}
-    const text=await res.text();
-    const len=text.length;
-    console.log('🌐 FETCH ✅',len+' chars','—',(performance.now()-start).toFixed(0)+'ms','—',url.slice(0,80));
-    // Respuestas ridículamente cortas = el proxy no pudo extraer contenido útil
-    if(len<80)console.warn('🌐 FETCH ⚠️ respuesta corta ('+len+' chars), probablemente SPA o antibot —',url.slice(0,80));
-    return text;
-  }catch(e){
-    console.warn('🌐 FETCH ❌',e.message,'—',url.slice(0,80));
-    return 'ERROR: '+e.message;
-  }
+Busca en internet información actualizada si la pregunta lo requiere. Responde SIEMPRE con datos reales, no inventes. Si no encuentras información fiable, dilo con sarcasmo.`;
 }
 
 // ═══════════════════════════════════════════════════════════
-// MÓDULO 3 — stripHtml mejorado para WebView
-// ═══════════════════════════════════════════════════════════
-function stripHtml(html){
-  if(!html||typeof html!=='string')return '';
-  const inLen=html.length;
-  let t=html;
-  // 1. Intentar extraer solo el contenido principal
-  const articleMatch=t.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
-  const mainMatch=t.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
-  if(articleMatch)t=articleMatch[1];
-  else if(mainMatch)t=mainMatch[1];
-
-  // 2. Eliminar bloques de ruido (con su contenido)
-  t=t.replace(/<(script|style|noscript|iframe|nav|footer|header|aside|form|svg|figure|figcaption)[^>]*>[\s\S]*?<\/\1>/gi,' ');
-
-  // 3. Eliminar elementos vacíos comunes y atributos data-*
-  t=t.replace(/<[a-z]+[^>]*\sdata-[^=]+="[^"]*"[^>]*>/gi,'');
-
-  // 4. Block elements → newline  
-  t=t.replace(/<\/(div|p|h[1-6]|li|tr|article|section|blockquote|pre|table|ul|ol|dl|details|summary|hr|fieldset|legend|main|td|th)[^>]*>/gi,'\n');
-  t=t.replace(/<br[^>]*>/gi,'\n');
-
-  // 5. Headings → newline + espacio para separar
-  t=t.replace(/<h[1-6][^>]*>/gi,'\n');
-
-  // 6. Eliminar todas las etiquetas restantes  
-  t=t.replace(/<[^>]+>/g,' ');
-
-  // 7. Entidades HTML
-  t=t.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-  t=t.replace(/&quot;/g,'"').replace(/&#x27;/g,"'").replace(/&nbsp;/g,' ');
-  t=t.replace(/&#(\d+);/g,(_,d)=>String.fromCharCode(parseInt(d)));
-
-  // 8. Normalizar whitespace
-  t=t.replace(/[ \t]+/g,' ');
-
-  // 9. Eliminar líneas muy cortas (ruido de menú) y líneas vacías
-  t=t.split('\n').filter(line=>line.trim().length>3).join('\n');
-
-  // 10. Colapsar múltiples saltos de línea
-  t=t.replace(/\n{3,}/g,'\n\n').trim();
-  const out=t.slice(0,16000);
-  console.log('🧹 STRIP',inLen+'→'+out.length+' chars');
-  return out;
-}
-
-// ═══════════════════════════════════════════════════════════
-// MÓDULO 4 — Voz (SpeechRecognition + SpeechSynthesis)
+// MÓDULO 2 — Voz (SpeechRecognition + SpeechSynthesis)
 // ═══════════════════════════════════════════════════════════
 let recognition=null;
 let isProcessing=false;
@@ -737,132 +629,116 @@ function speakResponse(text){
 }
 
 // ═══════════════════════════════════════════════════════════
-// MÓDULO 5 — DeepSeek + flujo de búsqueda
+// MÓDULO 3 — Gemini API (search grounding nativo)
 // ═══════════════════════════════════════════════════════════
-async function callDeepSeek(messages){
-  const lastMsg=messages[messages.length-1];
-  const role=lastMsg.role,preview=(lastMsg.content||'').slice(0,120);
-  console.log('🤖 DS REQ →',role,'('+messages.length+' msgs)','"'+preview+'"');
-  const ctrl=new AbortController();
-  const t=setTimeout(()=>ctrl.abort(),35000);
-  try{
-    const res=await fetch(DEEPSEEK_URL,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+DEEPSEEK_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({model:'deepseek-v4-flash',messages,stream:false,max_tokens:1500}),
-      signal:ctrl.signal
+async function callGemini(userPrompt){
+  const systemPrompt = buildAlienPrompt();
+  const fullPrompt = systemPrompt + '\n\nPREGUNTA DEL USUARIO: ' + userPrompt;
+  const preview = userPrompt.slice(0, 120);
+  console.log('🤖 GEMINI REQ →','"'+preview+'"');
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), GEMINI_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(GEMINI_URL + '?key=' + GEMINI_KEY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { maxOutputTokens: 600, temperature: 0.7 }
+      }),
+      signal: ctrl.signal
     });
     clearTimeout(t);
-    if(!res.ok){
-      const err=await res.text();
-      if(res.status===401)return 'ERROR_DS:401 — Clave API inválida';
-      if(res.status===429)return 'ERROR_DS:429 — Rate limit';
-      return 'ERROR_DS:'+res.status+' — '+err.slice(0,100);
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('🤖 GEMINI ❌ HTTP ' + res.status, errText.slice(0, 150));
+      if (res.status === 401) return { text: 'ERROR:401 — Clave API inválida', grounding: null };
+      if (res.status === 429) return { text: 'ERROR:429 — Límite de peticiones alcanzado', grounding: null };
+      return { text: 'ERROR:' + res.status + ' — ' + errText.slice(0, 100), grounding: null };
     }
-    const data=await res.json();
-    const content=data.choices?.[0]?.message?.content||'ERROR_DS: Respuesta vacía';
-    console.log('🤖 DS RES ←',(content||'').slice(0,150));
-    return content;
-  }catch(e){
+
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const grounding = data.candidates?.[0]?.groundingMetadata || null;
+
+    if (grounding) {
+      const chunks = grounding.groundingChunks || [];
+      const queries = grounding.webSearchQueries || [];
+      console.log('🌐 GROUNDING — ' + chunks.length + ' fuentes, queries:', queries);
+      chunks.forEach((ch, i) => {
+        console.log('  [' + i + '] ' + (ch.web?.title || '?') + ' — ' + ((ch.web?.uri || '').slice(0, 80)));
+      });
+    } else {
+      console.log('🌐 GROUNDING — no se disparó búsqueda (el modelo decidió que no hacía falta)');
+    }
+
+    console.log('🤖 GEMINI RES ←', (text || '').slice(0, 150));
+    return { text, grounding };
+
+  } catch (e) {
     clearTimeout(t);
-    console.warn('🤖 DS ❌',e.message);
-    return 'ERROR_DS: '+e.message;
+    console.warn('🤖 GEMINI ❌', e.message);
+    if (e.name === 'AbortError') return { text: 'ERROR:Timeout — Gemini tardó demasiado', grounding: null };
+    return { text: 'ERROR: ' + e.message, grounding: null };
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 4 — Flujo de conversación (Gemini directo)
+// ═══════════════════════════════════════════════════════════
 async function handleUserInput(text){
   console.log('🗣️  USER SAID','"'+text+'"');
   if(state!=='thinking') setAlienState('thinking');
   clearTimeout(listeningTimeout);
 
-  const MAX_RETRIES = 3;
-  let allFailedUrls = [];
-  let allValidResults = [];
+  // ── Una sola llamada: Gemini busca, recupera y responde ──
+  const { text: rawAnswer, grounding } = await callGemini(text);
+
+  // ── Procesar respuesta ──
   let finalAnswer;
-
-  for(let attempt = 0; attempt < MAX_RETRIES; attempt++){
-    console.log('🔍 Intento '+(attempt+1)+'/'+MAX_RETRIES);
-    if(attempt > 0) showBubble('Rastreando... ('+(attempt+1)+'/'+MAX_RETRIES+')');
-
-    // Paso 1: callDeepSeek("¿buscar?")
-    const searchMsgs = [
-      {role:'system', content:buildSystemPrompt()},
-      {role:'user', content:text}
-    ];
-    if(allFailedUrls.length > 0){
-      searchMsgs.push({role:'user', content:'Las URLs anteriores no funcionaron: '+allFailedUrls.join(', ')+'. Dominios bloqueados: '+BLOCKED_DOMAINS.join(', ')+'. Sugiere URLs DIFERENTES, de fuentes directas (periódicos, blogs, webs oficiales).'});
-    }
-    const r1 = await callDeepSeek(searchMsgs);
-    if(r1.startsWith('ERROR_DS')){
-      console.warn('⚠️  Error DS en intento '+(attempt+1));
-      continue;
-    }
-    if(!r1.startsWith('SEARCH:')){
-      console.warn('⚠️  DeepSeek no devolvió SEARCH en intento '+(attempt+1));
-      continue;
-    }
-
-    // Paso 2: parsear URLs, filtrar Wikipedia si es pregunta actual, filtrar blacklist
-    const isActual = /\b(hoy|ahora|actual|reciente|últim[oa]|esta semana|este mes|este año|202[4-9]|202[0-9])\b/i.test(text);
-    let urls = r1.replace(/^SEARCH:\s*/,'').split(',').map(s=>s.trim()).filter(Boolean).slice(0,20);
-    if(isActual){
-      const antes = urls.length;
-      urls = urls.filter(u => !/wikipedia\.org/i.test(u));
-      if(urls.length < antes) console.log('🧹 Filtradas '+(antes-urls.length)+' URLs de Wikipedia (pregunta actual)');
-    }
-    const antesBL = urls.length;
-    urls = urls.filter(u => !blockedDomain(u));
-    if(urls.length < antesBL) console.log('🚫 Filtradas '+(antesBL-urls.length)+' URLs en blacklist');
-    if(urls.length === 0){
-      console.warn('⚠️  0 URLs válidas en intento '+(attempt+1));
-      continue;
-    }
-    console.log('🔗 URLs ('+urls.length+'):', urls);
-
-    // Paso 3: fetchUrl(url) → N → stripHtml
-    const results = await Promise.all(urls.map(async u => {
-      const raw = await fetchUrl(u);
-      if(!raw || raw.startsWith('ERROR')){ allFailedUrls.push(u); addToBlacklist(u); return null; }
-      const cleaned = stripHtml(raw);
-      if(cleaned.length < 60){ allFailedUrls.push(u); addToBlacklist(u); return null; }
-      return `[${u}]\n${cleaned.slice(0,16000)}`;
-    }));
-    const valid = results.filter(r => r !== null);
-    console.log('📄 Resultados válidos intento '+(attempt+1)+':', valid.length+'/'+urls.length);
-    allValidResults.push(...valid);
-  }
-
-  // Paso 4: interpretar todos los datos acumulados
-  if(allValidResults.length === 0){
-    finalAnswer = 'He rastreado la red humana '+MAX_RETRIES+' veces y no hay manera. La información es más esquiva que un agujero negro vestido de camuflaje.';
-  } else {
-    console.log('📊 Total resultados acumulados:', allValidResults.length);
-    const answer = await callDeepSeek([
-      {role:'system', content:buildAnswerPrompt()},
-      {role:'user', content:text},
-      {role:'user', content:'Resultados de '+MAX_RETRIES+' búsquedas:\n'+allValidResults.join('\n\n---\n\n').slice(0,120000)+'\n\nResponde a: "'+text+'". Con estos datos combinados. Sé sarcástico y breve (2-3 frases).'}
-    ]);
-    console.log('🤖 DS respuesta final:', (answer||'').slice(0,150));
-
-    if(answer.startsWith('ERROR_DS')){
-      finalAnswer = 'Mis circuitos galácticos colapsaron. Mejor pregúntame otra cosa.';
+  if(!rawAnswer || rawAnswer.startsWith('ERROR:')){
+    const errCode = rawAnswer ? rawAnswer.replace('ERROR:', '').split('—')[0].trim() : 'DESCONOCIDO';
+    console.warn('⚠️  Gemini error:', errCode);
+    if(errCode === '401'){
+      finalAnswer = 'Mi llave galáctica no funciona. Dile a mi ingeniero que revise la API key de Gemini.';
+    } else if(errCode === '429'){
+      finalAnswer = 'He hecho demasiadas preguntas a la red humana. Espera un rato antes de consultarme otra vez.';
+    } else if(errCode === 'Timeout'){
+      finalAnswer = 'La red humana va muy lenta. Ni con motores warp llego a tiempo. Pregúntame otra vez.';
     } else {
-      finalAnswer = answer.replace(/\n?SEARCH:\s*https?:\/\/\S+/gi,'').trim();
-      if(finalAnswer.length < 10){
-        finalAnswer = 'Tengo los datos pero no logro articular una respuesta. Culpa de la ionosfera.';
-      }
+      finalAnswer = 'Mis circuitos galácticos colapsaron. La Matrix humana me ha bloqueado. Intenta de nuevo.';
+    }
+  } else if(rawAnswer.trim().length < 5){
+    finalAnswer = 'Tengo los datos pero no logro articular una respuesta. Culpa de la ionosfera.';
+  } else {
+    // Limpiar cualquier URL que el modelo pudiera haber colado
+    finalAnswer = rawAnswer
+      .replace(/\n?SEARCH:\s*https?:\/\/\S+/gi, '')
+      .replace(/https?:\/\/\S+/g, '')
+      .trim();
+    if(finalAnswer.length < 5){
+      finalAnswer = 'Encontré datos pero son ilegibles. Los humanos escriben cada vez peor.';
     }
   }
 
   console.log('✅ RESPUESTA FINAL','"'+finalAnswer+'"');
+  if(grounding){
+    const sources = (grounding.groundingChunks || []).map(c => c.web?.title).filter(Boolean);
+    if(sources.length) console.log('📚 Fuentes:', sources.join(', '));
+  }
+
   showBubble(finalAnswer);
   speakResponse(finalAnswer);
   isProcessing = false;
-  console.log('🏁 FLUJO COMPLETO — volviendo a idle en cuanto TTS termine');
+  console.log('🏁 FLUJO COMPLETO — volviendo a idle cuando TTS termine');
 }
 
 // ═══════════════════════════════════════════════════════════
-// MÓDULO 6 — Bocadillo y activación por tap
+// MÓDULO 5 — Bocadillo y activación por tap
 // ═══════════════════════════════════════════════════════════
 const bubbleEl=document.getElementById('bubble');
 let bubbleHideTimer=null;

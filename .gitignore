@@ -1,2 +1,4 @@
+proxy.log
+proxy.log.tmp
+*.png
 .playwright-mcp/
-*.log

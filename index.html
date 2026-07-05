@@ -27,21 +27,27 @@
     z-index:10;pointer-events:none;
   }
   .ui-layer>*{pointer-events:auto}
-  .title{color:var(--accent);font-size:clamp(28px,8vw,64px);font-weight:bold;letter-spacing:clamp(8px,2vw,20px);text-shadow:0 0 24px rgba(var(--accent-rgb),.6),0 0 60px rgba(var(--accent-rgb),.2)}
+  .title{position:fixed;top:0;left:0;width:100%;text-align:center;margin:0;padding:4px 0;color:var(--accent);font-size:clamp(28px,8vw,64px);font-weight:bold;letter-spacing:clamp(8px,2vw,20px);line-height:1;z-index:10;pointer-events:none;text-shadow:0 0 24px rgba(var(--accent-rgb),.6),0 0 60px rgba(var(--accent-rgb),.2)}
   .status{color:rgba(var(--accent-rgb),.4);font-size:clamp(12px,2.5vw,18px);letter-spacing:clamp(4px,1vw,8px);margin:8px 0 12px}
-  .bubble{position:fixed;top:6%;left:50%;transform:translateX(-50%);max-width:88vw;padding:18px 28px;background:rgba(0,0,0,0.93);border:2px solid var(--accent);color:var(--accent);font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s,border-color 0.4s,color 0.4s,box-shadow 0.4s;box-shadow:0 0 18px rgba(var(--accent-rgb),.25);border-radius:4px;line-height:1.5;pointer-events:none}
-  .bubble::after{content:'';position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-top:8px solid var(--accent)}
+  .bubble{position:fixed;bottom:0;left:0;width:100%;max-height:40vh;box-sizing:border-box;padding:24px 6vw;overflow:hidden;background:rgba(0,0,0,0.93);border:2px solid var(--accent);color:var(--accent);font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s,border-color 0.4s,color 0.4s,box-shadow 0.4s;box-shadow:0 0 18px rgba(var(--accent-rgb),.25);border-radius:4px;line-height:1.5;pointer-events:none}
+  .bubble::after{content:'';position:absolute;top:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-bottom:8px solid var(--accent)}
   .bubble.on{opacity:1}
   .bubble.error{border-color:#f44;color:#f66;box-shadow:0 0 18px rgba(255,68,68,.3)}
-  .bubble.error::after{border-top-color:#f44}
+  .bubble.error::after{border-bottom-color:#f44}
+  /* Botón pantalla completa: centro del top bar (entre fecha y hora) */
+  #fsWrap{position:fixed;top:0;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;z-index:15;pointer-events:none}
+  #fsBtn{pointer-events:auto;outline:none;background:rgba(0,0,0,0.55);border:2px solid var(--accent);color:var(--accent);width:clamp(40px,6vh,76px);height:clamp(40px,6vh,76px);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;border-radius:4px;box-shadow:0 0 12px rgba(var(--accent-rgb),.2);transition:background .15s,box-shadow .4s}
+  #fsBtn:active{background:rgba(var(--accent-rgb),.25)}
+  #fsBtn svg{width:62%;height:62%;display:block}
   /* Reloj y etiquetas SIMPLE/SEARCH se dibujan en el canvas (pixel art 5×7) */
 </style>
 </head>
 <body>
 <div class="bubble" id="bubble"></div>
+<div id="fsWrap"><button id="fsBtn" type="button" aria-label="Pantalla completa"></button></div>
+<div class="title" id="title">ALIEN</div>
 <canvas id="c"></canvas>
 <div class="ui-layer">
-  <div class="title">ALIEN</div>
   <div class="status" id="status">> IDLE</div>
 </div>
 
@@ -164,10 +170,14 @@ function setAlienState(newState){
   if(newState==='thinking'&&prevState!=='thinking')startThinkSound();
   else if(newState!=='thinking')stopAllSound();
   if(newState!=='speaking')ttsStartTick=-999;  // resetear al salir de speaking
+  // Al terminar la voz, ocultar el bocadillo de la respuesta
+  if(prevState==='speaking'&&bubbleFollowVoice)hideBubble();
   statusEl.textContent=statusText[newState];
 }
 
 const statusEl=document.getElementById('status');
+const titleEl=document.getElementById('title');
+let lastLayoutW=-1,cachedTitleH=0,pxCur=0,cyCur=0,layoutInit=false;  // cache título + posición/tamaño suavizado del alien
 const statusText={idle:'> IDLE',listening:'> LISTENING',thinking:'> THINKING',speaking:'> SPEAKING'};
 
 // ═══════════════════ SPRITES 32×32 — Alien Space Invaders ═══════════════════
@@ -483,11 +493,30 @@ function render(){
   const tsH=Math.max(3,Math.min(Math.round(H/55),Math.floor(W*0.42/30))); // hora
   const tsF=Math.max(2,Math.min(Math.round(H/120),Math.floor(W*0.5/54))); // fecha apilada (día más largo = 9 letras)
   const topBarH=Math.max(7*tsH,15*tsF)+Math.max(14,H*0.025);
+  if(fsWrap&&fsWrap._h!==topBarH){fsWrap._h=topBarH;fsWrap.style.height=topBarH+'px';}  // alinear botón FS con la barra superior
+  // Altura del título "ALIEN" (recalculada solo al cambiar el ancho, para evitar reflow por frame)
+  if(lastLayoutW!==W){lastLayoutW=W; cachedTitleH=titleEl?(titleEl.offsetHeight||0):0;}
+  const titleH=cachedTitleH;
+  if(titleEl&&titleEl._top!==topBarH){titleEl._top=topBarH; titleEl.style.top=topBarH+'px';}  // título centrado justo debajo de la barra superior
   const padX=Math.max(16,W*0.022), topBaseY=topBarH/2;
-  const px=Math.max(2,Math.floor(Math.min(W*0.6,(H-topBarH-uiH)*0.92)/32));
+  // Zona disponible para el alien + bocadillo (entre la barra superior+título y la inferior)
+  const zoneTop=topBarH+titleH, zoneBottom=H-uiH, zoneH=zoneBottom-zoneTop;
+  // Con el bocadillo visible, el alien sube a la mitad superior y cede la inferior al texto
+  const bubbleOn=bubbleEl&&bubbleEl.classList.contains('on');
+  const alienZoneH=bubbleOn?Math.max(120,zoneH*0.52):zoneH;
+  const pxTarget=Math.max(2,Math.floor(Math.min(W*0.6,alienZoneH*0.92)/32));
+  const cyTarget=zoneTop+alienZoneH/2;
+  if(!layoutInit){pxCur=pxTarget;cyCur=cyTarget;layoutInit=true;}  // arranque sin salto
+  pxCur+=(pxTarget-pxCur)*0.2; cyCur+=(cyTarget-cyCur)*0.2;       // transición suave al moverse el alien
+  const px=Math.max(2,Math.round(pxCur));
   const iW=32*px,iH=32*px;
-  const cx=W/2,cy=topBarH+(H-topBarH-uiH)/2;
+  const cx=W/2, cy=cyCur;
   let ox=cx-iW/2,oy=cy-iH/2,ex=0;
+  // Bocadillo anclado abajo: crece hasta tocar al alien por su parte inferior
+  const bubbleBottom=uiH;
+  const bubbleMaxH=Math.max(64,(H-bubbleBottom)-(cy+iH/2));
+  if(bubbleEl&&bubbleEl._mh!==bubbleMaxH){bubbleEl._mh=bubbleMaxH; bubbleEl.style.maxHeight=bubbleMaxH+'px';}
+  if(bubbleEl&&bubbleEl._bot!==bubbleBottom){bubbleEl._bot=bubbleBottom; bubbleEl.style.bottom=bubbleBottom+'px';}
 
   // ── Estrellas ──
   for(const s of stars){
@@ -999,7 +1028,7 @@ async function handleUserInput(text){
     if(sources.length) console.log('📚 Fuentes:', sources.join(', '));
   }
 
-  showBubble(finalAnswer);
+  showBubble(finalAnswer,false,true);
   speakResponse(finalAnswer);
   isProcessing = false;
   console.log('🏁 FLUJO COMPLETO — volviendo a idle cuando TTS termine');
@@ -1010,12 +1039,26 @@ async function handleUserInput(text){
 // ═══════════════════════════════════════════════════════════
 const bubbleEl=document.getElementById('bubble');
 let bubbleHideTimer=null;
+let bubbleFollowVoice=false;
 
-function showBubble(text,isError=false){
+function showBubble(text,isError=false,followVoice=false){
   bubbleEl.textContent=text;
   bubbleEl.className='bubble on'+(isError?' error':'');
   clearTimeout(bubbleHideTimer);
-  bubbleHideTimer=setTimeout(()=>{bubbleEl.className='bubble';},isError?5000:10000);
+  bubbleFollowVoice=followVoice;
+  if(followVoice){
+    // El bocadillo dura lo que dure la voz: se oculta al terminar el TTS.
+    // Fallback de seguridad (60s) por si el motor de voz no arranca.
+    bubbleHideTimer=setTimeout(()=>{bubbleFollowVoice=false;bubbleEl.className='bubble';},60000);
+  }else{
+    bubbleHideTimer=setTimeout(()=>{bubbleEl.className='bubble';},isError?5000:10000);
+  }
+}
+
+function hideBubble(){
+  clearTimeout(bubbleHideTimer);
+  bubbleFollowVoice=false;
+  bubbleEl.className='bubble';
 }
 
 // Tap en pantalla → elige modo (mitad izq=SIMPLE / der=SEARCH) y escucha
@@ -1027,6 +1070,28 @@ document.body.addEventListener('click',(e)=>{
   initAudio();                          // inicializar audio en gesto de usuario (WebView)
   startListening();
 });
+
+// ── Botón pantalla completa (centro del top bar). No activa audio:
+//    stopPropagation evita que el tap llegue al listener del body. ──
+const fsWrap=document.getElementById('fsWrap');
+const fsBtn=document.getElementById('fsBtn');
+const FS_EXPAND='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg>';
+const FS_CONTRACT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v4a1 1 0 0 1-1 1H4M15 4v4a1 1 0 0 0 1 1h4M9 20v-4a1 1 0 0 1-1-1H4M15 20v-4a1 1 0 0 0 1-1h4"/></svg>';
+function updateFsIcon(){fsBtn.innerHTML=document.fullscreenElement?FS_CONTRACT:FS_EXPAND;}
+function toggleFullscreen(){
+  const el=document.documentElement;
+  if(document.fullscreenElement){
+    const ex=document.exitFullscreen||document.webkitExitFullscreen;
+    if(ex)ex.call(document);
+  }else{
+    const req=el.requestFullscreen||el.webkitRequestFullscreen||el.webkitRequestFullScreen;
+    if(req)req.call(el);
+  }
+}
+fsBtn.addEventListener('click',(e)=>{e.stopPropagation();toggleFullscreen();});
+document.addEventListener('fullscreenchange',updateFsIcon);
+document.addEventListener('webkitfullscreenchange',updateFsIcon);
+updateFsIcon();
 
 // Inicializar voz al cargar
 initSpeech();

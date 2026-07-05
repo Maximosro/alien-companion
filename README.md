@@ -1,6 +1,6 @@
 # ALIEN — Compañero de Voz Pixel Art
 
-Compañero de voz con IA que responde con sarcasmo galáctico. App 100% web: un solo HTML con Canvas 32×32, sintetizador chiptune, Web Speech API y búsqueda web verificada.
+Compañero de voz con IA que responde con sarcasmo galáctico. App 100% web: un solo HTML con Canvas 32×32, sintetizador chiptune, Web Speech API y búsqueda web con Google Search Grounding.
 
 ## Arquitectura
 
@@ -9,75 +9,55 @@ navegador (index.html)
   ├── Canvas 32×32 · 15fps · 4 estados animados
   ├── Web Audio API · sintetizador chiptune (square wave)
   ├── Web Speech API · STT (es-ES) + TTS
-  ├── DeepSeek v4 Flash · api.deepseek.com/v1
-  └── CORS Proxy · 82.112.240.102:3000
+  └── Gemini 2.5 Flash · generativelanguage.googleapis.com
 
-VPS Hostinger (proxy)
-  └── Node.js 22 Alpine · Docker + Traefik
-      └── fetchUrl + stripHtml server-side
-      └── User-Agent: Chrome 131 + Accept/Accept-Language
+LLM (server-side)
+  └── Google Search Grounding — búsqueda + recuperación + respuesta en una sola llamada
 ```
 
 ## Flujo de búsqueda
 
 ```
-voz → handleUserInput → callDeepSeek → SEARCH:urls → fetchUrl × N → stripHtml → callDeepSeek(datos) → respuesta
+voz → handleUserInput → callGemini(googleSearch) → respuesta + groundingMetadata
 ```
 
 ### Paso a paso
 
 1. Usuario habla → `SpeechRecognition` captura texto
-2. `handleUserInput` envía pregunta a DeepSeek con fecha y hora exacta
-3. DeepSeek responde con `SEARCH:url1,url2,url3`
-4. Se fetchean las URLs en paralelo vía el CORS proxy
-5. `stripHtml` extrae el contenido relevante de cada página
-6. **Se repiten los pasos 2-5 tres veces**, acumulando todos los resultados
-7. Con todos los datos combinados, se llama a DeepSeek para la respuesta final
-8. El Alien habla la respuesta (TTS) y la muestra en bocadillo
+2. `handleUserInput` envía la pregunta a Gemini 2.5 Flash con `tools: [{ googleSearch: {} }]`
+3. Gemini decide si necesita buscar en internet (Google Search Grounding)
+4. Gemini devuelve la respuesta + `groundingMetadata` (fuentes, queries usadas)
+5. El Alien habla la respuesta (TTS) y la muestra en bocadillo
 
-### Reintentos
-
-Siempre 3 batidas. Cada una pide URLs a DeepSeek con feedback de las URLs que fallaron en intentos anteriores. Los resultados de las 3 se acumulan y se envían juntos a DeepSeek para la interpretación final. Si no se consigue ningún resultado en las 3 batidas, se muestra un fallback.
-
-### Blacklist
-
-Lista negra de dominios que crece automáticamente. Se carga desde `localStorage` al iniciar (clave `alien_blocked_domains`) y persiste entre sesiones. Si no hay datos previos, arranca vacía. Cuando `fetchUrl` falla (0 caracteres, error de red, respuesta antibot), el dominio se añade automáticamente y nunca se vuelve a consultar. El código filtra las URLs antes de fetchear, sin que DeepSeek necesite saberlo.
-
-### Filtro de actualidad
-
-Si la pregunta contiene palabras de actualidad (`hoy`, `ahora`, `reciente`, `2026`...), las URLs de Wikipedia se descartan antes de fetchear. Para preguntas atemporales, Wikipedia está permitida.
+Todo ocurre en **una sola llamada API**. Gemini maneja la búsqueda, recuperación y grounding del lado del servidor. Sin URLs, sin proxy, sin batidas.
 
 ### Prompt del sistema
 
-DeepSeek recibe: identidad de ALIEN, fecha y hora exacta (con zona horaria), y dos reglas: responder con `SEARCH:url1,url2,url3` y no usar SPAs (solo fuentes HTML server-side).
+Gemini recibe: identidad de ALIEN, fecha y hora exacta (con zona horaria ISO), y la instrucción de buscar en internet si la pregunta lo requiere. El prompt incluye la fecha para que las búsquedas devuelvan resultados actualizados.
 
-### Contexto
+### Grounding
 
-Hasta 8000 caracteres por URL y 30000 caracteres totales enviados a DeepSeek en la interpretación final.
+Cuando Gemini usa Google Search, la respuesta incluye `groundingMetadata` con:
+- `webSearchQueries` — queries que Google Search ejecutó
+- `groundingChunks` — fuentes web usadas (título + URI)
+- `searchEntryPoint` — URI renderizada del search engine
+
+Estos datos se loguean en consola para transparencia, pero el usuario solo ve la respuesta final del Alien.
 
 ## Módulos
 
-### `buildSystemPrompt()`
+### `buildAlienPrompt()`
 Genera el prompt del sistema con identidad de ALIEN, fecha, hora exacta y zona horaria.
 
 ### `handleUserInput(text)`
-Orquesta el flujo completo: 3 batidas de búsqueda + interpretación final.
+Orquesta el flujo completo: una llamada a Gemini + procesamiento de respuesta + TTS.
 
-### `callDeepSeek(messages)`
-Cliente HTTP para DeepSeek v4 Flash. Timeout 35s. Maneja errores 401, 429 y errores de red.
-
-### `fetchUrl(url)`
-Cliente HTTP vía CORS proxy. Timeout 10s. Añade `https://` si falta protocolo.
-
-### `stripHtml(html)`
-Extrae contenido de `<article>` o `<main>`, elimina tags, scripts, navegación y ruido. Trunca a 8000 caracteres.
-
-### `blockedDomain(url)` / `addToBlacklist(url)`
-Filtro de dominios bloqueados. `addToBlacklist` se dispara automáticamente cuando un fetch falla.
+### `callGemini(userPrompt)`
+Cliente HTTP para Gemini 2.5 Flash con Google Search Grounding. Timeout 20s. Maneja errores 401, 429, timeout y errores de red. Devuelve `{ text, grounding }`.
 
 ### Voz
-- `initSpeech()` — Configura `SpeechRecognition` (es-ES, continuous=false, interimResults=true)
-- `startListening()` — Activa escucha con timeout de 15s y debounce de silencio de 1.5s
+- `initSpeech()` — Configura `SpeechRecognition` (es-ES, continuous=true, interimResults=true)
+- `startListening()` — Activa escucha con timeout de 15s y debounce de silencio de 2s
 - `speakResponse(text)` — TTS con rate 1.05, pitch 0.95, fallbacks de timeout
 
 ### Render
@@ -95,19 +75,13 @@ Filtro de dominios bloqueados. `addToBlacklist` se dispara automáticamente cuan
 | Componente | Tecnología |
 |-----------|-----------|
 | Frontend | JavaScript vanilla, HTML5 Canvas, Web Audio, Web Speech |
-| LLM | DeepSeek v4 Flash (API OpenAI-compatible) |
-| Proxy | Node.js 22, Alpine Linux, Docker, Traefik |
-| VPS | Hostinger KVM 1 (Ubuntu 24.04) |
+| LLM | Gemini 2.5 Flash (Google AI Studio) con Google Search Grounding |
 
 ## Desarrollo
 
 ### Levantar
 
 ```bash
-# 1. Proxy CORS (puerto 3000) — en una terminal
-node proxy/server.js
-
-# 2. Servidor web (puerto 8080) — en otra terminal
 node serve.js
 ```
 
@@ -116,31 +90,10 @@ Abrir `http://localhost:8080` en navegador. Tocar la pantalla para hablar.
 ### Tirar
 
 ```bash
-# Mata los procesos por puerto
 # Windows (cmd):
-netstat -ano | findstr ":3000 :8080" | findstr LISTENING
+netstat -ano | findstr ":8080" | findstr LISTENING
 taskkill /F /PID <PID>
 
 # Linux / macOS:
-lsof -ti:3000 -ti:8080 | xargs kill
+lsof -ti:8080 | xargs kill
 ```
-
-### Sin proxy local
-
-Si no necesitás el proxy local (usás el desplegado en VPS):
-
-```bash
-node serve.js
-```
-
-Y en la consola del navegador:
-
-```js
-localStorage.setItem('alien_use_local_proxy', 'false')
-```
-
-Esto apunta al proxy de producción `https://proxy.srv1158554.hstgr.cloud/`.
-
-## Proxy
-
-El proxy CORS está desplegado en `82.112.240.102:3000`. Endpoint: `/?url={encoded_url}`. Devuelve texto limpio (HTML → plain text, JSON → verbatim). User-Agent de Chrome 131 con headers Accept y Accept-Language para evitar bloqueos básicos.

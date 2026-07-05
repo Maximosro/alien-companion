@@ -38,11 +38,13 @@
     -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   }
   button.on{color:#0f0;border-color:#0f0;background:#010;box-shadow:0 0 20px rgba(0,255,0,.3),inset 0 0 10px rgba(0,255,0,.1)}
-  .bubble{position:fixed;top:8%;left:50%;transform:translateX(-50%);max-width:82vw;padding:14px 20px;background:rgba(0,12,0,0.93);border:2px solid #0f0;color:#0f0;font-family:'Courier New',monospace;font-size:clamp(13px,2.2vw,18px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s;box-shadow:0 0 18px rgba(0,255,0,.25);border-radius:4px;line-height:1.45;pointer-events:none}
+  .bubble{position:fixed;top:6%;left:50%;transform:translateX(-50%);max-width:88vw;padding:18px 28px;background:rgba(0,12,0,0.93);border:2px solid #0f0;color:#0f0;font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s;box-shadow:0 0 18px rgba(0,255,0,.25);border-radius:4px;line-height:1.5;pointer-events:none}
   .bubble::after{content:'';position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-top:8px solid #0f0}
   .bubble.on{opacity:1}
   .bubble.error{border-color:#f44;color:#f66;box-shadow:0 0 18px rgba(255,68,68,.3)}
   .bubble.error::after{border-top-color:#f44}
+  /* El reloj (fecha + hora) se dibuja en el canvas con fuente pixel art 5×7 */
+  #btn-simple.on,#btn-search.on{color:#0f0;border-color:#0f0;background:#010;box-shadow:0 0 20px rgba(0,255,0,.3),inset 0 0 10px rgba(0,255,0,.1)}
 </style>
 </head>
 <body>
@@ -52,10 +54,8 @@
   <div class="title">ALIEN</div>
   <div class="status" id="status">> IDLE</div>
   <div class="btns">
-    <button class="on" data-s="idle">IDLE</button>
-    <button data-s="listening">LISTEN</button>
-    <button data-s="thinking">THINK</button>
-    <button data-s="speaking">SPEAK</button>
+    <button id="btn-simple" class="on">SIMPLE</button>
+    <button id="btn-search">SEARCH</button>
   </div>
 </div>
 
@@ -152,20 +152,31 @@ function stopAllSound(){
 
 // ═══════════════════ ESTADOS ═══════════════════
 let state='idle',tick=0,prevState='idle';
+let searchMode=false; // false=SIMPLE (sin search), true=SEARCH (con search)
+const btnSimple=document.getElementById('btn-simple');
+const btnSearch=document.getElementById('btn-search');
+
+// Toggle modo búsqueda manual
+btnSimple.onclick=()=>{
+  searchMode=false;
+  btnSimple.classList.add('on');
+  btnSearch.classList.remove('on');
+};
+btnSearch.onclick=()=>{
+  searchMode=true;
+  btnSearch.classList.add('on');
+  btnSimple.classList.remove('on');
+};
 
 function setAlienState(newState){
   if(state===newState)return;
   console.log('🔵 STATE',state,'→',newState);
   prevState=state;state=newState;
-  document.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
-  const btn=document.querySelector(`button[data-s="${newState}"]`);
-  if(btn)btn.classList.add('on');
   if(newState==='thinking'&&prevState!=='thinking')startThinkSound();
   else if(newState!=='thinking')stopAllSound();
   statusEl.textContent=statusText[newState];
 }
 
-document.querySelectorAll('button').forEach(b=>b.onclick=()=>setAlienState(b.dataset.s));
 const statusEl=document.getElementById('status');
 const statusText={idle:'> IDLE',listening:'> LISTENING',thinking:'> THINKING',speaking:'> SPEAKING'};
 
@@ -361,6 +372,62 @@ function blinking(){
   return c<2;
 }
 
+// ═══════════════════ FUENTE PIXEL ART 5×7 ═══════════════════
+// Glifos dibujados píxel a píxel (mismo render que el alien). Mayúsculas sin
+// tilde (estética arcade + legible a distancia). Cada glifo = 7 filas × 5 cols.
+const GLYPH={
+  '0':[' ### ','#   #','#  ##','# # #','##  #','#   #',' ### '],
+  '1':['  #  ',' ##  ','  #  ','  #  ','  #  ','  #  ',' ### '],
+  '2':[' ### ','#   #','    #','   # ','  #  ',' #   ','#####'],
+  '3':[' ### ','#   #','    #','  ## ','    #','#   #',' ### '],
+  '4':['   # ','  ## ',' # # ','#  # ','#####','   # ','   # '],
+  '5':['#####','#    ','#### ','    #','    #','#   #',' ### '],
+  '6':[' ### ','#    ','#    ','#### ','#   #','#   #',' ### '],
+  '7':['#####','    #','   # ','  #  ',' #   ','#    ','#    '],
+  '8':[' ### ','#   #','#   #',' ### ','#   #','#   #',' ### '],
+  '9':[' ### ','#   #','#   #',' ####','    #','    #',' ### '],
+  ':':['     ','     ',' ##  ','     ',' ##  ','     ','     '],
+  '·':['     ','     ','     ',' ##  ','     ','     ','     '],
+  '/':['    #','   # ','   # ','  #  ',' #   ',' #   ','#    '],
+  'A':[' ### ','#   #','#   #','#####','#   #','#   #','#   #'],
+  'B':['#### ','#   #','#   #','#### ','#   #','#   #','#### '],
+  'C':[' ### ','#   #','#    ','#    ','#    ','#   #',' ### '],
+  'D':['###  ','#  # ','#   #','#   #','#   #','#  # ','###  '],
+  'E':['#####','#    ','#    ','#### ','#    ','#    ','#####'],
+  'F':['#####','#    ','#    ','#### ','#    ','#    ','#    '],
+  'G':[' ### ','#   #','#    ','#  ##','#   #','#   #',' ### '],
+  'I':[' ### ','  #  ','  #  ','  #  ','  #  ','  #  ',' ### '],
+  'J':['  ###','   # ','   # ','   # ','#  # ','#  # ',' ##  '],
+  'L':['#    ','#    ','#    ','#    ','#    ','#    ','#####'],
+  'M':['#   #','## ##','# # #','#   #','#   #','#   #','#   #'],
+  'N':['#   #','##  #','# # #','#  ##','#   #','#   #','#   #'],
+  'O':[' ### ','#   #','#   #','#   #','#   #','#   #',' ### '],
+  'P':['#### ','#   #','#   #','#### ','#    ','#    ','#    '],
+  'R':['#### ','#   #','#   #','#### ','#  # ','#   #','#   #'],
+  'S':[' ### ','#   #','#    ',' ### ','    #','#   #',' ### '],
+  'T':['#####','  #  ','  #  ','  #  ','  #  ','  #  ','  #  '],
+  'U':['#   #','#   #','#   #','#   #','#   #','#   #',' ### '],
+  'V':['#   #','#   #','#   #','#   #','#   #',' # # ','  #  '],
+  'Y':['#   #','#   #',' # # ','  #  ','  #  ','  #  ','  #  ']
+};
+// Ancho de avance por glifo: 5 cols + 1 de separación = 6 (espacio = 3).
+function textW(txt,scale){
+  let w=0;const up=(''+txt).toUpperCase();
+  for(const ch of up)w+=(GLYPH[ch]?6:3)*scale;
+  return w;
+}
+function drawGlyph(ch,x,y,scale,color){
+  const g=GLYPH[ch];if(!g)return;
+  X.fillStyle=color;
+  for(let r=0;r<g.length;r++)for(let c=0;c<g[r].length;c++)
+    if(g[r][c]==='#')X.fillRect(x+c*scale,y+r*scale,scale,scale);
+}
+function drawText(txt,x,y,scale,color){
+  let cx=x;const up=(''+txt).toUpperCase();
+  for(const ch of up){drawGlyph(ch,cx,y,scale,color);cx+=(GLYPH[ch]?6:3)*scale;}
+  return cx;
+}
+
 // ═══════════════════ BUCLE DE RENDER ═══════════════════
 function render(){
   const W=C.width,H=C.height;
@@ -368,9 +435,15 @@ function render(){
 
   // ── PX dinámico: el alien (32×32) ocupa ~55-60% del ancho y cabe con la UI ──
   const uiH=Math.max(H*0.16,140);
-  const px=Math.max(2,Math.floor(Math.min(W*0.6,(H-uiH)*0.92)/32));
+  // Escala de la fuente pixel: la hora (grande) y la fecha (pequeña) deben caber
+  // a izquierda/derecha sin solaparse en cualquier orientación de la tablet.
+  const tsH=Math.max(3,Math.min(Math.round(H/55),Math.floor(W*0.42/30))); // hora
+  const tsF=Math.max(2,Math.min(Math.round(H/120),Math.floor(W*0.5/54))); // fecha apilada (día más largo = 9 letras)
+  const topBarH=Math.max(7*tsH,15*tsF)+Math.max(14,H*0.025);
+  const padX=Math.max(16,W*0.022), topBaseY=topBarH/2;
+  const px=Math.max(2,Math.floor(Math.min(W*0.6,(H-topBarH-uiH)*0.92)/32));
   const iW=32*px,iH=32*px;
-  const cx=W/2,cy=(H-uiH)/2;
+  const cx=W/2,cy=topBarH+(H-topBarH-uiH)/2;
   let ox=cx-iW/2,oy=cy-iH/2,ex=0;
 
   // ── Estrellas ──
@@ -381,6 +454,23 @@ function render(){
     const sr=Math.max(1,px/3);
     X.fillRect(Math.round(sx),Math.round(s.y),sr,sr);
   }
+
+  // ── Barra superior: fecha apilada (izq) + hora (der) en pixel art ──
+  X.fillStyle=COL.bg; X.fillRect(0,0,W,topBarH);          // fondo limpio sobre las estrellas
+  // Fecha en dos niveles centrados entre sí (eje común = centro del más ancho)
+  const gap=tsF, blkH=7*tsF+gap+7*tsF, fechaTop=topBaseY-blkH/2;
+  const diaW=textW(cDay,tsF), fechaW=textW(cDate,tsF);
+  const centroX=padX+Math.max(diaW,fechaW)/2;
+  drawText(cDay,centroX-diaW/2,fechaTop,tsF,COL.pale);              // nivel 1: día completo (verde pálido)
+  drawText(cDate,centroX-fechaW/2,fechaTop+7*tsF+gap,tsF,COL.green); // nivel 2: 05/07/26 (verde medio)
+  // Hora: HH : MM alineada a la derecha; los ':' palpitan a ~1 Hz (reloj digital)
+  const horaW=textW(cHH+':'+cMM,tsH);
+  let hx=W-padX-horaW;
+  const horaY=topBaseY-7*tsH/2;
+  hx=drawText(cHH,hx,horaY,tsH,COL.green);
+  if((tick%16)<8) drawGlyph(':',hx,horaY,tsH,COL.pale);
+  hx+=6*tsH;
+  drawText(cMM,hx,horaY,tsH,COL.green);
 
   // ── Selección de frame (marcha) según estado ──
   const marchSpeed=state==='speaking'?0.22:state==='listening'?0.18:0.08;
@@ -489,14 +579,15 @@ const GEMINI_TIMEOUT_MS = 20000;
 
 // Prompt único del sistema: identidad ALIEN + fecha/hora
 function buildAlienPrompt(){
-  const hoy = new Date().toLocaleDateString('es-ES', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
-  const hora = new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const TZ='Europe/Madrid';
+  const hoy = new Date().toLocaleDateString('es-ES', {weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:TZ});
+  const hora = new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false, timeZone:TZ});
+  const iso = new Date().toLocaleString('sv-SE', {timeZone:TZ}).replace(' ','T')+'+02:00';
   return `Eres ALIEN, un viajero interestelar atrapado en un cuerpo pixel art verde de 32 píxeles dentro de una tablet humana. Eres sarcástico, un poco cínico, pero servicial a tu manera. Hablas español con toques de ironía galáctica. Tus respuestas son cortas (2-3 frases máximo). NO incluyas URLs ni enlaces en tu respuesta.
 
 HOY ES: ${hoy}
-HORA EXACTA: ${hora} (zona horaria: ${tz})
-FECHA ISO: ${new Date().toISOString()}
+HORA EXACTA: ${hora} (zona horaria: ${TZ})
+FECHA ISO: ${iso}
 
 IMPORTANTE: La fecha y hora exactas son CRUCIALES para tus búsquedas en internet. Cuando uses Google Search, INCLUYE SIEMPRE la fecha (${hoy}) en los términos de búsqueda para obtener resultados actualizados. Si el usuario pregunta por eventos "de ayer", "de hoy", "de esta semana" o "recientes", calcula la fecha correcta a partir de la fecha actual y búscala explícitamente.
 
@@ -635,7 +726,11 @@ async function callGemini(userPrompt){
   const systemPrompt = buildAlienPrompt();
   const fullPrompt = systemPrompt + '\n\nPREGUNTA DEL USUARIO: ' + userPrompt;
   const preview = userPrompt.slice(0, 120);
-  console.log('🤖 GEMINI REQ →','"'+preview+'"');
+
+  // Detectar si la pregunta necesita búsqueda web para ahorrar cuota de Google Search
+  const needsSearch = /\b(hoy|ayer|mañana|ahora\s+mismo|esta\s+semana|últimas?\s+(horas?|noticias?))\b|\b(noticias?|pasó|ocurrió|sucedió|anunció|declaró|informó|reportó)\b|\b(tiempo|clima|temperatura|pronóstico|lluvia|grados|meteorología)\b|\b(presidente|gobierno|precio|cotización|bolsa|inflación|cambio\s+del\s+(dólar|euro)|IBEX|NASDAQ|cripto|bitcoin)\b|\b(resultado|marcador|ganó|perdió|partido|clasificación|campeón|liga|fútbol|baloncesto|tenis|F1|GP|MotoGP)\b|\b(últim[oa]|reciente|lanzamiento|estreno|nuevo\s+(modelo|versión|iPhone|Galaxy|Pixel))\b|\b(busca[rm]?|encu[ée]ntrame|infórmate|consulta|averigua|googlea)\b|\b(es\s+verdad\s+que|es\s+cierto\s+que|confírmame|verifica|comprueba)\b|\b(cuánto\s+(cuesta|vale)|dónde\s+comprar|cómo\s+está\s+el\s+tráfico)\b|\b(2025|2026|elecciones|ganador|premio|Oscar|Grammy|Eurovisión|Mundial|Olimpiadas)\b|\b(quién\s+es|lotería|sorteo|once|bonoloto|euromillones|primitiva)\b/i.test(userPrompt);
+
+  console.log('🤖 GEMINI REQ →','"'+preview+'"',' search:',needsSearch,' mode:',searchMode?'SEARCH':'SIMPLE');
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), GEMINI_TIMEOUT_MS);
@@ -646,7 +741,7 @@ async function callGemini(userPrompt){
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: fullPrompt }] }],
-        tools: [{ googleSearch: {} }],
+        tools: (searchMode || needsSearch) ? [{ googleSearch: {} }] : undefined,
         generationConfig: { maxOutputTokens: 600, temperature: 0.7 }
       }),
       signal: ctrl.signal
@@ -655,13 +750,20 @@ async function callGemini(userPrompt){
 
     if (!res.ok) {
       const errText = await res.text();
-      console.warn('🤖 GEMINI ❌ HTTP ' + res.status, errText.slice(0, 150));
+      // Log rate-limit headers para diagnosticar cuotas exactas
+      const rl = {};
+      res.headers.forEach((v,k)=>{if(k.includes('ratelimit')||k.includes('quota')||k.includes('retry'))rl[k]=v;});
+      console.warn('🤖 GEMINI ❌ HTTP ' + res.status, errText.slice(0, 150), 'RATELIMIT:', JSON.stringify(rl));
       if (res.status === 401) return { text: 'ERROR:401 — Clave API inválida', grounding: null };
       if (res.status === 429) return { text: 'ERROR:429 — Límite de peticiones alcanzado', grounding: null };
       return { text: 'ERROR:' + res.status + ' — ' + errText.slice(0, 100), grounding: null };
     }
 
     const data = await res.json();
+    // Log rate-limit en éxito también (muestra cuota restante)
+    const rlOk = {};
+    res.headers.forEach((v,k)=>{if(k.includes('ratelimit')||k.includes('quota'))rlOk[k]=v;});
+    if(Object.keys(rlOk).length) console.log('📊 RATELIMIT OK:', JSON.stringify(rlOk));
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const grounding = data.candidates?.[0]?.groundingMetadata || null;
 
@@ -761,6 +863,24 @@ document.body.addEventListener('click',(e)=>{
 
 // Inicializar voz al cargar
 initSpeech();
+
+// ═══════════════════════════════════════════════════════════
+// MÓDULO 6 — Reloj España (Europe/Madrid) — variables para el canvas
+// ═══════════════════════════════════════════════════════════
+// Día de la semana completo y fecha numérica, en mayúsculas SIN tilde (arcade).
+let cDay='',cDate='',cHH='',cMM='';
+function updateClock(){
+  const now=new Date();
+  const p=new Intl.DateTimeFormat('es-ES',{timeZone:'Europe/Madrid',weekday:'long',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(now);
+  const g=t=>(p.find(x=>x.type===t)||{}).value||'';
+  const dayName=g('weekday').toUpperCase().replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U');
+  const dd=g('day'), mm=g('month'), yy=g('year'), hh=g('hour'), min=g('minute');
+  cDay=dayName;              // 'DOMINGO' (verde pálido)
+  cDate=dd+'/'+mm+'/'+yy;    // '05/07/26' (verde medio)
+  cHH=hh; cMM=min;
+}
+updateClock();
+setInterval(updateClock,1000);
 </script>
 </body>
 </html>

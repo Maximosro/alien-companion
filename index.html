@@ -749,17 +749,22 @@ function initSpeech(){
   recognition.maxAlternatives=1;
 
   recognition.onresult=(event)=>{
-    // Reconstruir SIEMPRE el texto desde event.results (fuente de verdad del API)
-    // iterando desde 0 y ASIGNANDO (no acumulando). En Android el motor finaliza
-    // versiones crecientes del mismo resultado ("cuál" → "cuál es" → "cuál es la"…)
-    // en el mismo índice; al acumular con += desde resultIndex se apilaban todas y
-    // llegaba basura tipo "cuálcuál escuál es la…". Reconstruyendo desde 0 siempre
-    // reflejamos el estado actual, sin duplicar.
+    // Android envía resultados ACUMULATIVOS (cada nueva entrada contiene el texto
+    // completo, no solo el delta): results[0]="que", results[1]="que hora",
+    // results[2]="que hora es". Concatenarlos con espacios producía basura tipo
+    // "que que hora que hora es". El fix: si un resultado posterior contiene
+    // este como prefijo → está subsumido → se salta.
     let finals='',interim='';
     for(let i=0;i<event.results.length;i++){
       const r=event.results[i];
       const t=(r[0]&&r[0].transcript)?r[0].transcript.trim():'';
       if(!t)continue;
+      let subsumed=false;
+      for(let j=i+1;j<event.results.length;j++){
+        const later=(event.results[j][0]&&event.results[j][0].transcript)?event.results[j][0].transcript.trim():'';
+        if(later&&later.startsWith(t)){subsumed=true;break;}
+      }
+      if(subsumed)continue;
       if(r.isFinal) finals+=(finals?' ':'')+t;
       else interim+=(interim?' ':'')+t;
     }

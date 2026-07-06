@@ -29,11 +29,15 @@
   .ui-layer>*{pointer-events:auto}
   .title{position:fixed;top:0;left:0;width:100%;text-align:center;margin:0;padding:4px 0;color:var(--accent);font-size:clamp(28px,8vw,64px);font-weight:bold;letter-spacing:clamp(8px,2vw,20px);line-height:1;z-index:10;pointer-events:none;text-shadow:0 0 24px rgba(var(--accent-rgb),.6),0 0 60px rgba(var(--accent-rgb),.2)}
   .status{color:rgba(var(--accent-rgb),.4);font-size:clamp(12px,2.5vw,18px);letter-spacing:clamp(4px,1vw,8px);margin:8px 0 12px}
-  .bubble{position:fixed;bottom:0;left:0;width:100%;max-height:40vh;box-sizing:border-box;padding:24px 6vw;overflow:hidden;background:rgba(0,0,0,0.93);border:2px solid var(--accent);color:var(--accent);font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s,border-color 0.4s,color 0.4s,box-shadow 0.4s;box-shadow:0 0 18px rgba(var(--accent-rgb),.25);border-radius:4px;line-height:1.5;pointer-events:none}
+  .bubble{position:fixed;bottom:0;left:0;width:100%;max-height:40vh;box-sizing:border-box;padding:24px 6vw;overflow-y:auto;overflow-x:hidden;background:rgba(0,0,0,0.93);border:2px solid var(--accent);color:var(--accent);font-family:'Courier New',monospace;font-size:clamp(20px,3.5vw,32px);text-align:center;z-index:20;opacity:0;transition:opacity 0.3s,border-color 0.4s,color 0.4s,box-shadow 0.4s;box-shadow:0 0 18px rgba(var(--accent-rgb),.25);border-radius:4px;line-height:1.5;pointer-events:none;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--accent) transparent}
   .bubble::after{content:'';position:absolute;top:-12px;left:50%;transform:translateX(-50%);border:8px solid transparent;border-bottom:8px solid var(--accent)}
-  .bubble.on{opacity:1}
+  .bubble.on{opacity:1;pointer-events:auto}
   .bubble.error{border-color:#f44;color:#f66;box-shadow:0 0 18px rgba(255,68,68,.3)}
   .bubble.error::after{border-bottom-color:#f44}
+  /* scrollbar sutil para el bocadillo (WebKit) */
+  .bubble::-webkit-scrollbar{width:6px}
+  .bubble::-webkit-scrollbar-track{background:transparent}
+  .bubble::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px}
   /* Botón pantalla completa: centro del top bar (entre fecha y hora) */
   #fsWrap{position:fixed;top:0;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;z-index:15;pointer-events:none}
   #fsBtn{pointer-events:auto;outline:none;background:rgba(0,0,0,0.55);border:2px solid var(--accent);color:var(--accent);width:clamp(40px,6vh,76px);height:clamp(40px,6vh,76px);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;border-radius:4px;box-shadow:0 0 12px rgba(var(--accent-rgb),.2);transition:background .15s,box-shadow .4s}
@@ -745,18 +749,27 @@ function initSpeech(){
   recognition.maxAlternatives=1;
 
   recognition.onresult=(event)=>{
-    let interim='',final='';
-    for(let i=event.resultIndex;i<event.results.length;i++){
-      const t=event.results[i][0].transcript;
-      event.results[i].isFinal?final+=t:interim+=t;
+    // Reconstruir SIEMPRE el texto desde event.results (fuente de verdad del API)
+    // iterando desde 0 y ASIGNANDO (no acumulando). En Android el motor finaliza
+    // versiones crecientes del mismo resultado ("cuál" → "cuál es" → "cuál es la"…)
+    // en el mismo índice; al acumular con += desde resultIndex se apilaban todas y
+    // llegaba basura tipo "cuálcuál escuál es la…". Reconstruyendo desde 0 siempre
+    // reflejamos el estado actual, sin duplicar.
+    let finals='',interim='';
+    for(let i=0;i<event.results.length;i++){
+      const r=event.results[i];
+      const t=(r[0]&&r[0].transcript)?r[0].transcript.trim():'';
+      if(!t)continue;
+      if(r.isFinal) finals+=(finals?' ':'')+t;
+      else interim+=(interim?' ':'')+t;
     }
-    if(final){accumulatedFinal+=final;}
+    accumulatedFinal=finals;
     lastInterim=interim;   // último parcial (por si el motor no llega a finalizarlo)
     // Cualquier señal de voz (final O parcial) reinicia el debounce de silencio,
     // así no cortamos mientras el usuario sigue hablando o hace una pausa breve.
     clearTimeout(silenceTimeout);
-    console.log('🎤 HEARD','final="'+final+'" interim="'+interim+'" accumulated="'+accumulatedFinal+'"');
-    if((accumulatedFinal+interim).trim()){
+    console.log('🎤 HEARD','final="'+finals+'" interim="'+interim+'" accumulated="'+accumulatedFinal+'"');
+    if((accumulatedFinal+(interim?' '+interim:'')).trim()){
       silenceTimeout=setTimeout(()=>{
         const text=(accumulatedFinal+(lastInterim?' '+lastInterim:'')).trim();
         accumulatedFinal='';lastInterim='';
@@ -766,6 +779,7 @@ function initSpeech(){
         clearTimeout(listeningTimeout);
         if(recognition)try{recognition.stop();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
         setAlienState('thinking');
+        typeQuestion(text);
         handleUserInput(text);
       },2000);
     }
@@ -786,12 +800,19 @@ function initSpeech(){
   // ponytail: onspeechend just arms the silence timeout; onresult's debounce handles the rest
   recognition.onspeechend=()=>{};
   recognition.onend=()=>{
-    // Con continuous=true la sesión YA NO se cierra en las pausas: onend solo salta
-    // cuando la paramos nosotros o cuando el servicio de STT cae (red). Si seguimos
-    // en escucha, rearmamos como red de seguridad; si no, ignoramos.
+    // onend salta al parar nosotros o si el servicio de STT cae. Si ya tenemos texto
+    // reconocido, NO reabrimos: cada reapertura hacía que el motor volviera a
+    // finalizar la frase desde el principio (versiones crecientes) y la acumulación
+    // la corrompía. El debounce de silencio (2s) y el timeout global (15s) procesan
+    // lo reconocido. Solo reabrimos si aún no se ha oído nada (el usuario tarda
+    // en empezar a hablar).
     if(state==='listening'){
-      console.log('🔄 ONEND — el servicio STT terminó solo, reabriendo escucha');
-      try{recognition.start();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
+      if(accumulatedFinal.trim()){
+        console.log('🔚 ONEND con texto — no se reabre; el debounce procesará');
+      }else{
+        console.log('🔄 ONEND sin texto — reabriendo escucha');
+        try{recognition.start();}catch(e){if(e.name!=='InvalidStateError')console.error(e);}
+      }
     }else{
       console.log('🔚 ONEND — estado='+state+', no se reinicia');
     }
@@ -812,6 +833,7 @@ function startListening(){
   clearTimeout(silenceTimeout);
   accumulatedFinal='';lastInterim='';
   setAlienState('listening');
+  showListeningAnim();   // bocadillo con animación "..." mientras escucha
   startRecognition();
   listeningTimeout=setTimeout(()=>{
     if(state==='listening'&&!alreadyProcessed){
@@ -822,6 +844,7 @@ function startListening(){
       accumulatedFinal='';
       if(text){
         setAlienState('thinking');
+        typeQuestion(text);
         handleUserInput(text);
       }else{
         showBubble('Se acabó el tiempo. Habla más rápido, terrícola.');
@@ -1042,6 +1065,7 @@ let bubbleHideTimer=null;
 let bubbleFollowVoice=false;
 
 function showBubble(text,isError=false,followVoice=false){
+  stopTypewriter();stopListenAnim();  // el texto fijo reemplaza cualquier efecto en curso
   bubbleEl.textContent=text;
   bubbleEl.className='bubble on'+(isError?' error':'');
   clearTimeout(bubbleHideTimer);
@@ -1056,9 +1080,52 @@ function showBubble(text,isError=false,followVoice=false){
 }
 
 function hideBubble(){
+  stopTypewriter();stopListenAnim();
   clearTimeout(bubbleHideTimer);
   bubbleFollowVoice=false;
   bubbleEl.className='bubble';
+}
+
+// Bocadillo visible y persistente (sin ocultado automático) durante un estado activo
+function bubbleHold(){
+  clearTimeout(bubbleHideTimer);
+  bubbleFollowVoice=true;
+  bubbleHideTimer=setTimeout(()=>{bubbleFollowVoice=false;bubbleEl.className='bubble';},120000);
+  bubbleEl.className='bubble on';
+}
+
+// ── Animación "..." mientras escucha. NO escribe el reconocimiento en directo:
+//    en Android el motor reescribe/reenvía las primeras palabras y producía un bucle.
+//    La pregunta solo aparece al final, ya estable. ──
+let listenAnimTimer=null;
+function stopListenAnim(){clearTimeout(listenAnimTimer);listenAnimTimer=null;}
+function showListeningAnim(){
+  stopTypewriter();stopListenAnim();
+  bubbleHold();
+  const frames=['. ','. . ','. . .'];
+  let f=0;
+  const step=()=>{bubbleEl.textContent=frames[f%frames.length];f++;listenAnimTimer=setTimeout(step,400);};
+  step();
+}
+
+// ── Bocadillo de la pregunta con efecto "máquina de escribir" (solo texto final) ──
+let twTimer=null,twTarget='',twShown=0;
+function stopTypewriter(){clearTimeout(twTimer);twTarget='';twShown=0;}
+function scheduleType(){
+  clearTimeout(twTimer);
+  if(twShown>=twTarget.length){return;}
+  twShown++;
+  bubbleEl.textContent=twTarget.slice(0,twShown);
+  twTimer=setTimeout(scheduleType,32);  // ~31 caracteres/seg
+}
+// Revela la pregunta definitiva letra a letra. Se llama al pasar a 'thinking'
+// (texto ya estable), nunca durante el reconocimiento en directo.
+function typeQuestion(text){
+  text=text||'';
+  stopListenAnim();stopTypewriter();
+  bubbleHold();
+  twTarget=text;twShown=0;
+  scheduleType();
 }
 
 // Tap en pantalla → elige modo (mitad izq=SIMPLE / der=SEARCH) y escucha
